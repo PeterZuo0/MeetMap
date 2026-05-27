@@ -38,7 +38,7 @@ export function getLanguageOption(value: LanguageOptionValue): LanguageOption {
 }
 
 export function parseLanguageOption(value: string): LanguageOption | undefined {
-  if (value in LANGUAGE_OPTIONS_BY_VALUE) {
+  if (Object.hasOwn(LANGUAGE_OPTIONS_BY_VALUE, value)) {
     return LANGUAGE_OPTIONS_BY_VALUE[value as LanguageOptionValue];
   }
 

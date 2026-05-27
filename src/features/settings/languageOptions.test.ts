@@ -39,4 +39,6 @@ test("looks up language options by value", () => {
 test("parses external language option values", () => {
   expect(parseLanguageOption("zh")).toEqual({ value: "zh", label: "Chinese" });
   expect(parseLanguageOption("unsupported")).toBeUndefined();
+  expect(parseLanguageOption("toString")).toBeUndefined();
+  expect(parseLanguageOption("constructor")).toBeUndefined();
 });
