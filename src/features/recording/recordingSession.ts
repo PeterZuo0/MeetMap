@@ -112,6 +112,7 @@ export function createRecordingSession({
 }: RecordingSessionOptions): RecordingSession {
   let state: RecordingSessionState = { status: "idle" };
   let activeCaptureError: Error | undefined;
+  let startPromise: Promise<void> | undefined;
   const subscriptions: AudioCaptureUnsubscribe[] = [];
 
   function setInternalState(nextState: RecordingSessionState): void {
@@ -163,13 +164,19 @@ export function createRecordingSession({
           meetingId: request.meetingId,
           tracks: createRecordingTracks(request)
         });
-        await provider.start(request);
+        const pendingStart = provider.start(request);
+        startPromise = pendingStart;
+        await pendingStart;
+        if (startPromise === pendingStart) {
+          startPromise = undefined;
+        }
         setState({
           status: "recording",
           meetingId: request.meetingId,
           tracks: createRecordingTracks(request)
         });
       } catch (error) {
+        startPromise = undefined;
         setState({
           status: "failed",
           meetingId: request.meetingId,
@@ -220,6 +227,15 @@ export function createRecordingSession({
 
     async dispose(): Promise<void> {
       try {
+        const pendingStart = startPromise;
+        if (pendingStart) {
+          try {
+            await pendingStart;
+          } catch {
+            // start() records the failure state and propagates the original error.
+          }
+        }
+
         if (state.status === "recording") {
           await this.stop();
         }

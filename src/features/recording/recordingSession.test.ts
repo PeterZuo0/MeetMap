@@ -268,3 +268,32 @@ test("dispose stops active provider capture and unsubscribes callbacks", async (
     tracks: provider.stopResult.tracks
   });
 });
+
+test("dispose waits for in-flight start and stops provider capture", async () => {
+  const provider = new FakeAudioCaptureProvider();
+  const startDeferred = createDeferred<void>();
+  provider.start = async (request) => {
+    provider.startedRequests.push(request);
+    return startDeferred.promise;
+  };
+  const session = createRecordingSession({ provider });
+
+  const start = session.start({
+    meetingId: "meeting-123",
+    tracks: {
+      microphone: { filePath: "meetings/meeting-123/audio/microphone.wav" }
+    }
+  });
+  const dispose = session.dispose();
+
+  startDeferred.resolve();
+  await Promise.all([start, dispose]);
+
+  expect(provider.stopCalls).toBe(1);
+  expect(session.state.status).not.toBe("recording");
+  expect(session.state).toEqual({
+    status: "processing-ready",
+    meetingId: "meeting-123",
+    tracks: provider.stopResult.tracks
+  });
+});
