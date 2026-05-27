@@ -1,351 +1,238 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { MeetingMetadata, ProcessingStep } from "../features/meetings/meetingTypes";
-import { LANGUAGE_OPTIONS, type LanguageOptionValue } from "../features/settings/languageOptions";
-
-type MeetMapApi = {
-  platform: string;
-  createMeeting(input: {
-    title: string;
-    outputLanguage: LanguageOptionValue;
-  }): Promise<MeetingMetadata>;
-  startRecording(meetingId: string): Promise<MeetingMetadata>;
-  stopRecording(): Promise<MeetingMetadata>;
-  processMeeting(meetingId: string): Promise<MeetingMetadata>;
-  openExport(input: { meetingId: string; kind: "word" | "html" }): Promise<void>;
-};
-
-declare global {
-  interface Window {
-    meetMap?: MeetMapApi;
-  }
-}
-
-const PROCESSING_STEPS: { value: ProcessingStep; label: string }[] = [
-  { value: "activity_detection", label: "Activity detection" },
-  { value: "transcription", label: "Transcription" },
-  { value: "merge", label: "Transcript merge" },
-  { value: "structure_extraction", label: "Structure extraction" },
-  { value: "word_export", label: "Word export" },
-  { value: "html_map_export", label: "HTML map export" },
-  { value: "completed", label: "Completed" }
-];
-
-type WorkflowPhase = "setup" | "recording" | "processing" | "results" | "error";
+import type { LanguageOptionValue } from "../features/settings/languageOptions";
+import type { AppSettings, WorkflowPhase } from "./meetMapApi";
+import { DetailScreen } from "./ui/DetailScreen";
+import { LibraryScreen } from "./ui/LibraryScreen";
+import { MeetMapShell } from "./ui/MeetMapShell";
+import { PreRecordingScreen } from "./ui/PreRecordingScreen";
+import { ProcessingScreen } from "./ui/ProcessingScreen";
+import { RecordingScreen } from "./ui/RecordingScreen";
+import { SettingsScreen } from "./ui/SettingsScreen";
+import { DEFAULT_APP_SETTINGS } from "./ui/theme";
 
 export function App() {
   const api = window.meetMap;
-  const [title, setTitle] = useState("Untitled meeting");
-  const [outputLanguage, setOutputLanguage] = useState<LanguageOptionValue>("auto");
-  const [phase, setPhase] = useState<WorkflowPhase>("setup");
+  const [settings, setSettings] = useState<AppSettings>(DEFAULT_APP_SETTINGS);
+  const [phase, setPhase] = useState<WorkflowPhase>("library");
   const [meeting, setMeeting] = useState<MeetingMetadata | null>(null);
-  const [activeStep, setActiveStep] = useState<ProcessingStep | undefined>();
+  const [draftTitle, setDraftTitle] = useState("Untitled meeting");
+  const [draftOutputLanguage, setDraftOutputLanguage] = useState<LanguageOptionValue>(
+    settings.defaultOutputLanguage
+  );
+  const [isStarting, setIsStarting] = useState(false);
+  const [isStopping, setIsStopping] = useState(false);
+  const [activeStep, setActiveStep] = useState<ProcessingStep>("activity_detection");
   const [error, setError] = useState<string | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
 
-  async function runAction(action: () => Promise<void>) {
+  useEffect(() => {
+    document.body.classList.toggle("theme-dark", settings.theme === "dark");
+    document.body.classList.toggle("theme-light", settings.theme !== "dark");
+    document.documentElement.style.setProperty("--accent", settings.accent);
+    document.documentElement.style.setProperty("--accent-text", settings.accent);
+    document.documentElement.style.setProperty("--accent-soft", `${settings.accent}1f`);
+  }, [settings]);
+
+  const crumbs = useMemo(() => {
+    switch (phase) {
+      case "library":
+        return ["MeetMap", "All meetings"];
+      case "pre":
+        return ["MeetMap", "New recording"];
+      case "recording":
+        return ["MeetMap", "Recording"];
+      case "processing":
+        return ["MeetMap", "Processing"];
+      case "detail":
+        return ["MeetMap", "Meeting detail"];
+      case "settings":
+        return ["MeetMap", "Settings"];
+    }
+  }, [phase]);
+
+  function navigate(nextPhase: WorkflowPhase) {
     setError(null);
-    try {
-      await action();
-    } catch (caughtError) {
-      setPhase("error");
-      setError(caughtError instanceof Error ? caughtError.message : String(caughtError));
+    setExportError(null);
+    setPhase(nextPhase);
+    if (nextPhase === "pre") {
+      setDraftOutputLanguage(settings.defaultOutputLanguage);
     }
   }
 
-  async function startMeeting() {
-    await runAction(async () => {
-      if (!api) {
-        throw new Error("MeetMap desktop API is unavailable");
-      }
+  async function startRecording() {
+    if (!api) {
+      setError("MeetMap desktop API is unavailable");
+      return;
+    }
 
-      const createdMeeting = await api.createMeeting({ title, outputLanguage });
+    const title = draftTitle.trim();
+    if (!title) {
+      setError("Meeting title is required");
+      return;
+    }
+
+    setIsStarting(true);
+    setError(null);
+    try {
+      const createdMeeting = await api.createMeeting({
+        title,
+        outputLanguage: draftOutputLanguage
+      });
       const recordingMeeting = await api.startRecording(createdMeeting.id);
       setMeeting(recordingMeeting);
       setPhase("recording");
-    });
+    } catch (caughtError) {
+      setError(formatError(caughtError));
+    } finally {
+      setIsStarting(false);
+    }
   }
 
-  async function stopAndProcessMeeting() {
-    await runAction(async () => {
-      if (!api || !meeting) {
-        throw new Error("No meeting is recording");
-      }
+  async function stopRecording() {
+    if (!api) {
+      setError("MeetMap desktop API is unavailable");
+      return;
+    }
 
+    setIsStopping(true);
+    setError(null);
+    try {
       const recordedMeeting = await api.stopRecording();
       setMeeting(recordedMeeting);
       setActiveStep("activity_detection");
       setPhase("processing");
-      const processedMeeting = await api.processMeeting(recordedMeeting.id);
+      void processCurrentMeeting(recordedMeeting.id);
+    } catch (caughtError) {
+      setError(formatError(caughtError));
+    } finally {
+      setIsStopping(false);
+    }
+  }
+
+  async function processCurrentMeeting(meetingId: string) {
+    if (!api) {
+      setError("MeetMap desktop API is unavailable");
+      return;
+    }
+
+    const stagedSteps: ProcessingStep[] = [
+      "activity_detection",
+      "transcription",
+      "merge",
+      "structure_extraction",
+      "word_export",
+      "html_map_export"
+    ];
+    let stageIndex = 0;
+    const interval = window.setInterval(() => {
+      stageIndex = Math.min(stageIndex + 1, stagedSteps.length - 1);
+      setActiveStep(stagedSteps[stageIndex]);
+    }, 120);
+
+    try {
+      const processedMeeting = await api.processMeeting(meetingId);
+      window.clearInterval(interval);
       setMeeting(processedMeeting);
-      setActiveStep(processedMeeting.processingStep);
-      setPhase("results");
-    });
+      setActiveStep(processedMeeting.processingStep ?? "completed");
+      setPhase("detail");
+    } catch (caughtError) {
+      window.clearInterval(interval);
+      setError(formatError(caughtError));
+    }
   }
 
   async function openExport(kind: "word" | "html") {
-    await runAction(async () => {
-      if (!api || !meeting) {
-        return;
-      }
+    if (!api || !meeting) {
+      setExportError("Export is not available yet");
+      return;
+    }
 
+    setExportError(null);
+    try {
       await api.openExport({ meetingId: meeting.id, kind });
-    });
+    } catch (caughtError) {
+      setExportError(formatError(caughtError));
+    }
   }
 
-  function resetWorkflow() {
-    setMeeting(null);
-    setActiveStep(undefined);
-    setError(null);
-    setPhase("setup");
+  function updateSettings(nextSettings: AppSettings) {
+    setSettings(nextSettings);
+    if (phase === "pre") {
+      setDraftOutputLanguage(nextSettings.defaultOutputLanguage);
+    }
   }
 
   return (
-    <main style={styles.shell}>
-      <section aria-label="MeetMap workflow" style={styles.panel}>
-        <header style={styles.header}>
-          <p style={styles.eyebrow}>MeetMap MVP</p>
-          <h1 style={styles.heading}>Post-meeting workflow</h1>
-          <p style={styles.subtle}>
-            Setup, record, process, and export a meeting summary and map.
-          </p>
-        </header>
-
-        {phase === "setup" ? (
-          <section aria-label="Meeting setup" style={styles.stack}>
-            <label style={styles.label}>
-              Meeting title
-              <input
-                value={title}
-                onChange={(event) => setTitle(event.target.value)}
-                style={styles.input}
-              />
-            </label>
-            <label style={styles.label}>
-              Output language
-              <select
-                value={outputLanguage}
-                onChange={(event) =>
-                  setOutputLanguage(event.target.value as LanguageOptionValue)
-                }
-                style={styles.input}
-              >
-                {LANGUAGE_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <button disabled={!api} onClick={startMeeting} style={styles.primaryButton}>
-              Start recording
-            </button>
-          </section>
+    <div className="meetmap-root">
+      <MeetMapShell
+        crumbs={crumbs}
+        current={phase}
+        lang={settings.uiLanguage}
+        onNav={(target) => navigate(target)}
+        recording={phase === "recording"}
+        title={`MeetMap - ${crumbs[crumbs.length - 1]}`}
+      >
+        {phase === "library" ? (
+          <LibraryScreen
+            currentMeeting={meeting}
+            lang={settings.uiLanguage}
+            onNew={() => navigate("pre")}
+            onOpenCurrent={() => meeting && navigate("detail")}
+          />
         ) : null}
-
-        {phase === "recording" && meeting ? (
-          <section aria-label="Recording status" style={styles.stack}>
-            <StatusRow label="Meeting" value={meeting.title} />
-            <StatusRow label="Status" value="Recording demo audio" />
-            <button onClick={stopAndProcessMeeting} style={styles.primaryButton}>
-              Stop and process
-            </button>
-          </section>
+        {phase === "pre" ? (
+          <PreRecordingScreen
+            error={error}
+            isStarting={isStarting}
+            lang={settings.uiLanguage}
+            onCancel={() => navigate("library")}
+            onOutputLanguageChange={setDraftOutputLanguage}
+            onStart={() => void startRecording()}
+            onTitleChange={setDraftTitle}
+            outputLanguage={draftOutputLanguage}
+            title={draftTitle}
+          />
         ) : null}
-
+        {phase === "recording" ? (
+          <RecordingScreen
+            error={error}
+            isStopping={isStopping}
+            lang={settings.uiLanguage}
+            meeting={meeting}
+            onStop={() => void stopRecording()}
+          />
+        ) : null}
         {phase === "processing" ? (
-          <section aria-label="Processing progress" style={styles.stack}>
-            <ProgressList activeStep={activeStep} />
-          </section>
+          <ProcessingScreen
+            activeStep={activeStep}
+            error={error}
+            lang={settings.uiLanguage}
+            onBack={() => navigate("library")}
+            onRetry={() => {
+              if (meeting) {
+                setError(null);
+                void processCurrentMeeting(meeting.id);
+              }
+            }}
+          />
         ) : null}
-
-        {phase === "results" && meeting ? (
-          <section aria-label="Results" style={styles.stack}>
-            <ProgressList activeStep={meeting.processingStep} />
-            <StatusRow label="Status" value={meeting.status} />
-            <div style={styles.actions}>
-              <button
-                onClick={() => void openExport("word")}
-                style={styles.secondaryButton}
-              >
-                Open Word summary
-              </button>
-              <button
-                onClick={() => void openExport("html")}
-                style={styles.secondaryButton}
-              >
-                Open HTML map
-              </button>
-              <button onClick={resetWorkflow} style={styles.secondaryButton}>
-                New meeting
-              </button>
-            </div>
-          </section>
+        {phase === "detail" ? (
+          <DetailScreen
+            exportError={exportError}
+            lang={settings.uiLanguage}
+            meeting={meeting}
+            onExport={(kind) => void openExport(kind)}
+          />
         ) : null}
-
-        {phase === "error" ? (
-          <section aria-label="Workflow error" style={styles.stack}>
-            <p role="alert" style={styles.error}>
-              {error}
-            </p>
-            <button onClick={resetWorkflow} style={styles.secondaryButton}>
-              Back to setup
-            </button>
-          </section>
+        {phase === "settings" ? (
+          <SettingsScreen onChange={updateSettings} settings={settings} />
         ) : null}
-      </section>
-    </main>
-  );
-}
-
-function ProgressList({ activeStep }: { activeStep?: ProcessingStep }) {
-  const activeIndex = PROCESSING_STEPS.findIndex((step) => step.value === activeStep);
-
-  return (
-    <ol style={styles.progressList}>
-      {PROCESSING_STEPS.map((step, index) => {
-        const isComplete = activeIndex >= index;
-        const isActive = activeStep === step.value;
-        return (
-          <li key={step.value} style={styles.progressItem}>
-            <span
-              aria-hidden="true"
-              style={{
-                ...styles.progressDot,
-                background: isComplete ? "#2563eb" : "#d7deea"
-              }}
-            />
-            <span style={isActive ? styles.activeStep : undefined}>{step.label}</span>
-          </li>
-        );
-      })}
-    </ol>
-  );
-}
-
-function StatusRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div style={styles.statusRow}>
-      <span style={styles.statusLabel}>{label}</span>
-      <span>{value}</span>
+      </MeetMapShell>
     </div>
   );
 }
 
-const styles = {
-  shell: {
-    minHeight: "100vh",
-    display: "grid",
-    placeItems: "center",
-    background: "#f7f8fb",
-    color: "#1d2433",
-    fontFamily:
-      "Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
-    padding: "32px"
-  },
-  panel: {
-    width: "min(680px, 100%)",
-    padding: "32px",
-    border: "1px solid #d9dfeb",
-    borderRadius: "8px",
-    background: "#ffffff",
-    boxShadow: "0 18px 50px rgba(29, 36, 51, 0.08)"
-  },
-  header: {
-    marginBottom: "28px"
-  },
-  eyebrow: {
-    margin: "0 0 10px",
-    color: "#3766d5",
-    fontSize: "13px",
-    fontWeight: 700,
-    letterSpacing: "0"
-  },
-  heading: {
-    margin: "0 0 10px",
-    fontSize: "34px",
-    lineHeight: 1.1,
-    letterSpacing: "0"
-  },
-  subtle: {
-    margin: 0,
-    color: "#536073",
-    lineHeight: 1.55
-  },
-  stack: {
-    display: "grid",
-    gap: "18px"
-  },
-  label: {
-    display: "grid",
-    gap: "8px",
-    color: "#344054",
-    fontWeight: 700
-  },
-  input: {
-    minHeight: "42px",
-    border: "1px solid #cbd5e1",
-    borderRadius: "6px",
-    padding: "0 12px",
-    color: "#111827",
-    font: "inherit"
-  },
-  primaryButton: {
-    minHeight: "44px",
-    border: 0,
-    borderRadius: "6px",
-    background: "#2563eb",
-    color: "#ffffff",
-    font: "inherit",
-    fontWeight: 700,
-    cursor: "pointer"
-  },
-  secondaryButton: {
-    minHeight: "40px",
-    border: "1px solid #cbd5e1",
-    borderRadius: "6px",
-    background: "#ffffff",
-    color: "#1d2433",
-    font: "inherit",
-    fontWeight: 700,
-    cursor: "pointer"
-  },
-  actions: {
-    display: "flex",
-    flexWrap: "wrap",
-    gap: "10px"
-  },
-  statusRow: {
-    display: "grid",
-    gridTemplateColumns: "130px 1fr",
-    gap: "12px",
-    alignItems: "baseline"
-  },
-  statusLabel: {
-    color: "#536073",
-    fontWeight: 700
-  },
-  progressList: {
-    display: "grid",
-    gap: "12px",
-    margin: 0,
-    padding: 0,
-    listStyle: "none"
-  },
-  progressItem: {
-    display: "flex",
-    alignItems: "center",
-    gap: "10px"
-  },
-  progressDot: {
-    width: "12px",
-    height: "12px",
-    borderRadius: "50%"
-  },
-  activeStep: {
-    fontWeight: 700
-  },
-  error: {
-    margin: 0,
-    color: "#b42318",
-    fontWeight: 700
-  }
-} satisfies Record<string, React.CSSProperties>;
+function formatError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
