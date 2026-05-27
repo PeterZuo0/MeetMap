@@ -11,8 +11,20 @@ export type IdleRecordingSessionState = {
   status: "idle";
 };
 
+export type StartingRecordingSessionState = {
+  status: "starting";
+  meetingId: MeetingId;
+  tracks: RecordingTrackSnapshots;
+};
+
 export type RecordingSessionActiveState = {
   status: "recording";
+  meetingId: MeetingId;
+  tracks: RecordingTrackSnapshots;
+};
+
+export type StoppingRecordingSessionState = {
+  status: "stopping";
   meetingId: MeetingId;
   tracks: RecordingTrackSnapshots;
 };
@@ -37,7 +49,9 @@ export type FailedRecordingSessionState = {
 
 export type RecordingSessionState =
   | IdleRecordingSessionState
+  | StartingRecordingSessionState
   | RecordingSessionActiveState
+  | StoppingRecordingSessionState
   | StoppedRecordingSessionState
   | ProcessingReadyRecordingSessionState
   | FailedRecordingSessionState;
@@ -51,7 +65,7 @@ export type RecordingSession = {
   readonly state: RecordingSessionState;
   start(request: AudioCaptureStartRequest): Promise<void>;
   stop(): Promise<AudioCaptureStopResult>;
-  dispose(): void;
+  dispose(): Promise<void>;
 };
 
 function createRecordingTracks(
@@ -97,7 +111,12 @@ export function createRecordingSession({
   onStateChange
 }: RecordingSessionOptions): RecordingSession {
   let state: RecordingSessionState = { status: "idle" };
+  let activeCaptureError: Error | undefined;
   const subscriptions: AudioCaptureUnsubscribe[] = [];
+
+  function setInternalState(nextState: RecordingSessionState): void {
+    state = nextState;
+  }
 
   function setState(nextState: RecordingSessionState): void {
     state = nextState;
@@ -106,10 +125,13 @@ export function createRecordingSession({
 
   subscriptions.push(
     provider.onError((captureError) => {
+      if (state.status !== "recording" && state.status !== "stopping") {
+        return;
+      }
+
+      activeCaptureError = captureError.error;
       const meetingId =
-        state.status === "recording" ||
-        state.status === "stopped" ||
-        state.status === "processing-ready"
+        state.status === "recording" || state.status === "stopping"
           ? state.meetingId
           : undefined;
       setState({
@@ -135,6 +157,12 @@ export function createRecordingSession({
       }
 
       try {
+        activeCaptureError = undefined;
+        setInternalState({
+          status: "starting",
+          meetingId: request.meetingId,
+          tracks: createRecordingTracks(request)
+        });
         await provider.start(request);
         setState({
           status: "recording",
@@ -157,9 +185,18 @@ export function createRecordingSession({
       }
 
       const recordingState = state;
+      setInternalState({
+        status: "stopping",
+        meetingId: recordingState.meetingId,
+        tracks: recordingState.tracks
+      });
 
       try {
         const result = await provider.stop();
+        if (activeCaptureError) {
+          throw activeCaptureError;
+        }
+
         setState({
           status: "stopped",
           meetingId: recordingState.meetingId,
@@ -181,9 +218,15 @@ export function createRecordingSession({
       }
     },
 
-    dispose(): void {
-      for (const unsubscribe of subscriptions.splice(0)) {
-        unsubscribe();
+    async dispose(): Promise<void> {
+      try {
+        if (state.status === "recording") {
+          await this.stop();
+        }
+      } finally {
+        for (const unsubscribe of subscriptions.splice(0)) {
+          unsubscribe();
+        }
       }
     }
   };
