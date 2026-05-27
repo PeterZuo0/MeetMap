@@ -85,7 +85,21 @@ export function buildMeetingGraph(structure: MeetingStructure): MeetingGraph {
     }))
   ];
 
-  return { nodes, edges };
+  const graph = { nodes, edges };
+  assertValidMeetingGraph(graph);
+  return graph;
+}
+
+export function assertValidMeetingGraph(graph: MeetingGraph): void {
+  const nodeIds = new Set(graph.nodes.map((node) => node.id));
+
+  graph.nodes.forEach((node) => {
+    if (node.parentId && !nodeIds.has(node.parentId)) {
+      throw new Error(
+        `Meeting graph contains node "${node.id}" with missing parent "${node.parentId}".`
+      );
+    }
+  });
 }
 
 function childNode(

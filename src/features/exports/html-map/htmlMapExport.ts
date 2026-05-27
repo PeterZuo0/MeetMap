@@ -1,5 +1,5 @@
 import type { MeetingStructure } from "../../intelligence/meetingStructure";
-import { buildMeetingGraph, type MeetingGraph } from "./graphModel";
+import { assertValidMeetingGraph, buildMeetingGraph, type MeetingGraph } from "./graphModel";
 
 const GRAPH_DATA_TOKEN = "__MEETMAP_GRAPH_JSON__";
 
@@ -8,6 +8,7 @@ export function createHtmlMeetingMap(structure: MeetingStructure): string {
 }
 
 export function createHtmlMeetingMapFromGraph(graph: MeetingGraph): string {
+  assertValidMeetingGraph(graph);
   return HTML_TEMPLATE.replace(GRAPH_DATA_TOKEN, serializeForHtml(graph));
 }
 

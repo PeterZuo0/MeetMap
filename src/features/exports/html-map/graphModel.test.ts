@@ -1,6 +1,6 @@
 import type { MeetingStructure } from "../../intelligence/meetingStructure";
 import { buildMeetingGraph } from "./graphModel";
-import { createHtmlMeetingMap } from "./htmlMapExport";
+import { createHtmlMeetingMap, createHtmlMeetingMapFromGraph } from "./htmlMapExport";
 
 function meetingStructure(): MeetingStructure {
   return {
@@ -168,4 +168,27 @@ test("creates standalone HTML with embedded graph data", () => {
   expect(html).toContain("id=\"meetmap-graph-data\"");
   expect(html).toContain(JSON.stringify(graph).replace(/</g, "\\u003c"));
   expect(html).toContain("Product planning");
+});
+
+test("fails clearly when a structure child references a missing topic", () => {
+  const structure = meetingStructure();
+  structure.decisions[0] = {
+    ...structure.decisions[0],
+    topicId: "missing-topic"
+  };
+
+  expect(() => buildMeetingGraph(structure)).toThrow(
+    'Meeting graph contains node "decision-1" with missing parent "missing-topic".'
+  );
+});
+
+test("fails clearly when HTML export receives a graph with a missing parent", () => {
+  const graph = buildMeetingGraph(meetingStructure());
+  graph.nodes = graph.nodes.map((node) =>
+    node.id === "decision-1" ? { ...node, parentId: "missing-topic" } : node
+  );
+
+  expect(() => createHtmlMeetingMapFromGraph(graph)).toThrow(
+    'Meeting graph contains node "decision-1" with missing parent "missing-topic".'
+  );
 });
