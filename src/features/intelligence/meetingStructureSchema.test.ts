@@ -119,3 +119,82 @@ test("rejects relations that reference unknown nodes", () => {
     errors: ["relations[0].toId must reference an existing node"]
   });
 });
+
+test("rejects topic references that do not point to existing topics", () => {
+  const structure = validStructure();
+  structure.decisions[0] = { ...structure.decisions[0], topicId: "missing-topic" };
+  structure.actionItems[0] = { ...structure.actionItems[0], topicId: "missing-topic" };
+  structure.openQuestions[0] = { ...structure.openQuestions[0], topicId: "missing-topic" };
+  structure.risks[0] = { ...structure.risks[0], topicId: "missing-topic" };
+
+  expect(validateMeetingStructure(structure)).toEqual({
+    success: false,
+    errors: [
+      "decisions[0].topicId must reference an existing topic",
+      "actionItems[0].topicId must reference an existing topic",
+      "openQuestions[0].topicId must reference an existing topic",
+      "risks[0].topicId must reference an existing topic"
+    ]
+  });
+});
+
+test("rejects duplicate node ids across collections", () => {
+  const structure = validStructure();
+  structure.topics.push({
+    id: "decision-1",
+    type: "topic",
+    title: "Duplicate decision id",
+    summary: "This topic reuses the decision node id.",
+    sourceRefs: [{ segmentId: "seg-6", startTimeMs: 20_000, endTimeMs: 21_000 }]
+  });
+  structure.risks.push({
+    id: "action-1",
+    type: "risk",
+    text: "This risk reuses the action node id.",
+    severity: "low",
+    topicId: "topic-1",
+    sourceRefs: [{ segmentId: "seg-7", startTimeMs: 21_000, endTimeMs: 22_000 }]
+  });
+
+  expect(validateMeetingStructure(structure)).toEqual({
+    success: false,
+    errors: [
+      "decisions[0].id must be unique across meeting nodes",
+      "risks[1].id must be unique across meeting nodes"
+    ]
+  });
+});
+
+test("rejects duplicate relation ids", () => {
+  const structure = validStructure();
+  structure.relations[1] = { ...structure.relations[1], id: "rel-1" };
+
+  expect(validateMeetingStructure(structure)).toEqual({
+    success: false,
+    errors: ["relations[1].id must be unique across relations"]
+  });
+});
+
+test("accepts point nodes and allows relations to reference them", () => {
+  const structure = {
+    ...validStructure(),
+    points: [
+      {
+        id: "point-1",
+        type: "point",
+        text: "HTML map needs standalone supporting points.",
+        topicId: "topic-1",
+        sourceRefs: [{ segmentId: "seg-6", startTimeMs: 20_000, endTimeMs: 24_000 }]
+      }
+    ],
+    relations: [
+      ...validStructure().relations,
+      { id: "rel-6", type: "supports", fromId: "point-1", toId: "decision-1" }
+    ]
+  };
+
+  expect(validateMeetingStructure(structure)).toEqual({
+    success: true,
+    errors: []
+  });
+});

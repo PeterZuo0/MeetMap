@@ -40,6 +40,14 @@ export type MeetingTopic = {
   sourceRefs: SourceReference[];
 };
 
+export type MeetingPoint = {
+  id: string;
+  type: "point";
+  text: string;
+  topicId?: string;
+  sourceRefs: SourceReference[];
+};
+
 export type MeetingDecision = {
   id: string;
   type: "decision";
@@ -91,6 +99,7 @@ export type MeetingStructure = {
   metadata: MeetingMetadata;
   summary: string;
   topics: MeetingTopic[];
+  points?: MeetingPoint[];
   decisions: MeetingDecision[];
   actionItems: MeetingActionItem[];
   openQuestions: MeetingOpenQuestion[];
