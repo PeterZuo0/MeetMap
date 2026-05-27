@@ -2,12 +2,9 @@ import { app, BrowserWindow } from "electron";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createMeetingStore } from "../src/features/meetings/meetingStore.js";
-import { createDemoWorkflowServices } from "../src/features/workflow/postMeetingWorkflow.js";
 import { registerMeetingIpc } from "./ipc/meetingIpc.js";
-import {
-  createDemoAudioCaptureProvider,
-  registerRecordingIpc
-} from "./ipc/recordingIpc.js";
+import { registerRecordingIpc } from "./ipc/recordingIpc.js";
+import { resolveMainRuntimeConfig } from "./mainConfig.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -40,15 +37,24 @@ function createMainWindow() {
 }
 
 app.whenReady().then(() => {
+  const runtimeConfig = resolveMainRuntimeConfig({
+    env: process.env,
+    argv: process.argv
+  });
+
+  if (runtimeConfig.demoMode) {
+    console.warn(
+      "MeetMap demo mode is enabled; demo workflow and audio providers will create fake local artifacts."
+    );
+  }
+
   registerMeetingIpc({
     store: meetingStore,
-    workflowMode: "demo",
-    workflowServices: createDemoWorkflowServices()
+    ...runtimeConfig.meetingIpc
   });
   registerRecordingIpc({
     store: meetingStore,
-    audioCaptureMode: "demo",
-    createAudioCaptureProvider: createDemoAudioCaptureProvider
+    ...runtimeConfig.recordingIpc
   });
   createMainWindow();
 

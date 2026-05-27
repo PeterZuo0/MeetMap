@@ -1,16 +1,15 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { ipcMain } from "electron";
 import type { MeetingMetadata } from "../../src/features/meetings/meetingTypes.js";
 import type { MeetingStore } from "../../src/features/meetings/meetingStore.js";
 import type {
-  AudioCaptureError,
   AudioCaptureProvider,
-  AudioCaptureStartRequest,
-  AudioCaptureStopResult,
-  AudioCaptureUnsubscribe
 } from "../../src/features/recording/audioCaptureProvider.js";
 import { createRecordingSession } from "../../src/features/recording/recordingSession.js";
+import { createDemoAudioCaptureProvider } from "./demoAudioCaptureProvider.js";
+
+export { createDemoAudioCaptureProvider } from "./demoAudioCaptureProvider.js";
 
 export type RecordingIpcContext = {
   store: MeetingStore;
@@ -81,23 +80,84 @@ export function registerRecordingIpc({
     }
 
     const { meetingId, session } = activeSession;
-    const stopResult = await session.stop();
-    const metadata = await store.readMetadata(meetingId);
-    const now = new Date().toISOString();
-    const updatedMetadata: MeetingMetadata = {
-      ...metadata,
-      status: "recorded",
-      audioTracks: stopResult.tracks,
-      timestamps: {
-        ...metadata.timestamps,
-        updatedAt: now,
-        recordingEndedAt: now
+    try {
+      const stopResult = await session.stop();
+      const metadata = await store.readMetadata(meetingId);
+      const now = new Date().toISOString();
+      const updatedMetadata: MeetingMetadata = {
+        ...metadata,
+        status: "recorded",
+        audioTracks: stopResult.tracks,
+        timestamps: {
+          ...metadata.timestamps,
+          updatedAt: now,
+          recordingEndedAt: now
+        }
+      };
+      await store.writeMetadata(updatedMetadata);
+      return updatedMetadata;
+    } catch (error) {
+      try {
+        await persistFailedRecordingMetadata({
+          store,
+          meetingId
+        });
+      } catch (metadataError) {
+        throw createStopRecoveryError({ error, metadataError });
       }
-    };
-    await store.writeMetadata(updatedMetadata);
-    activeSession = undefined;
-    return updatedMetadata;
+
+      throw error;
+    } finally {
+      try {
+        await session.dispose();
+      } finally {
+        activeSession = undefined;
+      }
+    }
   });
+}
+
+async function persistFailedRecordingMetadata({
+  store,
+  meetingId
+}: {
+  store: MeetingStore;
+  meetingId: string;
+}): Promise<void> {
+  const metadata = await store.readMetadata(meetingId);
+  const now = new Date().toISOString();
+  await store.writeMetadata({
+    ...metadata,
+    status: "failed",
+    processingStep: "failed",
+    timestamps: {
+      ...metadata.timestamps,
+      updatedAt: now,
+      failedAt: now
+    }
+  });
+}
+
+function createStopRecoveryError({
+  error,
+  metadataError
+}: {
+  error: unknown;
+  metadataError: unknown;
+}): Error {
+  const stopError = error instanceof Error ? error : new Error(String(error));
+  const failedMetadataError =
+    metadataError instanceof Error
+      ? metadataError
+      : new Error(String(metadataError));
+  const recoveryError = new Error(
+    `Recording stop failed (${stopError.message}) and failed metadata could not be persisted (${failedMetadataError.message})`
+  ) as Error & { cause?: unknown };
+  recoveryError.cause = {
+    stopError,
+    metadataError: failedMetadataError
+  };
+  return recoveryError;
 }
 
 function resolveAudioCaptureProvider({
@@ -116,85 +176,4 @@ function resolveAudioCaptureProvider({
   }
 
   throw new Error("Audio capture provider must be configured");
-}
-
-export function createDemoAudioCaptureProvider(): AudioCaptureProvider {
-  let request: AudioCaptureStartRequest | undefined;
-  const errorSubscribers = new Set<(error: AudioCaptureError) => void>();
-
-  return {
-    async listDevices() {
-      return [
-        {
-          id: "demo-system",
-          label: "Demo system audio",
-          track: "system",
-          isDefault: true
-        },
-        {
-          id: "demo-microphone",
-          label: "Demo microphone",
-          track: "microphone",
-          isDefault: true
-        }
-      ];
-    },
-
-    async start(startRequest) {
-      request = startRequest;
-      await Promise.all(
-        Object.values(startRequest.tracks).map(async (track) => {
-          if (!track) {
-            return;
-          }
-          await writeFile(track.filePath, createDemoWavBytes());
-        })
-      );
-    },
-
-    async stop(): Promise<AudioCaptureStopResult> {
-      if (!request) {
-        throw new Error("Demo capture was not started");
-      }
-
-      return {
-        tracks: {
-          system: request.tracks.system
-            ? {
-                id: "system",
-                filePath: request.tracks.system.filePath,
-                format: "wav",
-                hasAudio: true
-              }
-            : undefined,
-          microphone: request.tracks.microphone
-            ? {
-                id: "microphone",
-                filePath: request.tracks.microphone.filePath,
-                format: "wav",
-                hasAudio: true
-              }
-            : undefined
-        }
-      };
-    },
-
-    onLevel(): AudioCaptureUnsubscribe {
-      return () => {};
-    },
-
-    onError(callback): AudioCaptureUnsubscribe {
-      errorSubscribers.add(callback);
-      return () => errorSubscribers.delete(callback);
-    }
-  };
-}
-
-function createDemoWavBytes(): Uint8Array {
-  return new Uint8Array([
-    0x52, 0x49, 0x46, 0x46, 0x24, 0x00, 0x00, 0x00, 0x57, 0x41, 0x56, 0x45,
-    0x66, 0x6d, 0x74, 0x20, 0x10, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00,
-    0x40, 0x1f, 0x00, 0x00, 0x80, 0x3e, 0x00, 0x00, 0x02, 0x00, 0x10, 0x00,
-    0x64, 0x61, 0x74, 0x61, 0x00, 0x00, 0x00, 0x00
-  ]);
 }
