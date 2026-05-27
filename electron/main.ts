@@ -2,8 +2,12 @@ import { app, BrowserWindow } from "electron";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createMeetingStore } from "../src/features/meetings/meetingStore.js";
+import { createDemoWorkflowServices } from "../src/features/workflow/postMeetingWorkflow.js";
 import { registerMeetingIpc } from "./ipc/meetingIpc.js";
-import { registerRecordingIpc } from "./ipc/recordingIpc.js";
+import {
+  createDemoAudioCaptureProvider,
+  registerRecordingIpc
+} from "./ipc/recordingIpc.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -36,8 +40,16 @@ function createMainWindow() {
 }
 
 app.whenReady().then(() => {
-  registerMeetingIpc({ store: meetingStore });
-  registerRecordingIpc({ store: meetingStore });
+  registerMeetingIpc({
+    store: meetingStore,
+    workflowMode: "demo",
+    workflowServices: createDemoWorkflowServices()
+  });
+  registerRecordingIpc({
+    store: meetingStore,
+    audioCaptureMode: "demo",
+    createAudioCaptureProvider: createDemoAudioCaptureProvider
+  });
   createMainWindow();
 
   app.on("activate", () => {

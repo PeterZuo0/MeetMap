@@ -1,8 +1,12 @@
+import { stat } from "node:fs/promises";
 import { ipcMain, shell } from "electron";
 import type { MeetingMetadata } from "../../src/features/meetings/meetingTypes.js";
 import type { MeetingStore } from "../../src/features/meetings/meetingStore.js";
 import { parseLanguageOption } from "../../src/features/settings/languageOptions.js";
-import { processMeeting } from "../../src/features/workflow/postMeetingWorkflow.js";
+import {
+  processMeeting,
+  type PostMeetingWorkflowServices
+} from "../../src/features/workflow/postMeetingWorkflow.js";
 
 export type CreateMeetingIpcInput = {
   title: string;
@@ -16,9 +20,15 @@ export type OpenExportIpcInput = {
 
 export type MeetingIpcContext = {
   store: MeetingStore;
+  workflowMode?: "production" | "demo";
+  workflowServices?: PostMeetingWorkflowServices;
 };
 
-export function registerMeetingIpc({ store }: MeetingIpcContext): void {
+export function registerMeetingIpc({
+  store,
+  workflowMode = "production",
+  workflowServices
+}: MeetingIpcContext): void {
   ipcMain.handle(
     "meeting:create",
     async (_event, input: CreateMeetingIpcInput): Promise<MeetingMetadata> => {
@@ -43,20 +53,38 @@ export function registerMeetingIpc({ store }: MeetingIpcContext): void {
   ipcMain.handle(
     "meeting:process",
     async (_event, meetingId: string): Promise<MeetingMetadata> => {
-      const result = await processMeeting({ store, meetingId });
+      const result = await processMeeting({
+        store,
+        meetingId,
+        mode: workflowMode,
+        services: workflowServices
+      });
       return result.metadata;
     }
   );
 
   ipcMain.handle("meeting:open-export", async (_event, input: OpenExportIpcInput) => {
     const metadata = await store.readMetadata(input.meetingId);
-    const filePath =
+    const paths = store.getMeetingPaths(input.meetingId);
+    const exportPath =
       input.kind === "word"
         ? metadata.exportPaths.wordSummaryPath
         : metadata.exportPaths.htmlMeetingMapPath;
+    const filePath =
+      input.kind === "word" ? paths.wordExportPath : paths.htmlMapExportPath;
 
-    if (!filePath) {
+    if (!exportPath) {
       throw new Error("Export is not available yet");
+    }
+
+    try {
+      await stat(filePath);
+    } catch (error) {
+      if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+        throw new Error("Export file is not available");
+      }
+
+      throw error;
     }
 
     const openResult = await shell.openPath(filePath);

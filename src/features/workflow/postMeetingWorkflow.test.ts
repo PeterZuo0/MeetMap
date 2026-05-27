@@ -52,6 +52,7 @@ test("processes a recorded meeting with demo services and persists recoverable p
     const result = await processMeeting({
       store,
       meetingId: meeting.id,
+      mode: "demo",
       onStepChange: (step) => observedSteps.push(step)
     });
 
@@ -80,6 +81,28 @@ test("processes a recorded meeting with demo services and persists recoverable p
       status: "completed",
       processingStep: "completed"
     });
+  } finally {
+    await rm(baseDirectory, { force: true, recursive: true });
+  }
+});
+
+test("requires explicit workflow services unless demo mode is enabled", async () => {
+  const baseDirectory = await mkdtemp(join(tmpdir(), "meetmap-workflow-"));
+
+  try {
+    const store = createMeetingStore(baseDirectory);
+    const meeting = await store.createMeeting({
+      id: "workflow-production",
+      title: "Workflow Production",
+      outputLanguage: "en"
+    });
+
+    await expect(
+      processMeeting({
+        store,
+        meetingId: meeting.id
+      })
+    ).rejects.toThrow("Post-meeting workflow services must be configured");
   } finally {
     await rm(baseDirectory, { force: true, recursive: true });
   }

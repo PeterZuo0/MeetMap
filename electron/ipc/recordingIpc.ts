@@ -14,9 +14,15 @@ import { createRecordingSession } from "../../src/features/recording/recordingSe
 
 export type RecordingIpcContext = {
   store: MeetingStore;
+  audioCaptureMode?: "production" | "demo";
+  createAudioCaptureProvider?: () => AudioCaptureProvider;
 };
 
-export function registerRecordingIpc({ store }: RecordingIpcContext): void {
+export function registerRecordingIpc({
+  store,
+  audioCaptureMode = "production",
+  createAudioCaptureProvider
+}: RecordingIpcContext): void {
   let activeSession:
     | {
         meetingId: string;
@@ -36,7 +42,10 @@ export function registerRecordingIpc({ store }: RecordingIpcContext): void {
       await mkdir(paths.audioDir, { recursive: true });
 
       const session = createRecordingSession({
-        provider: createDemoAudioCaptureProvider()
+        provider: resolveAudioCaptureProvider({
+          mode: audioCaptureMode,
+          createAudioCaptureProvider
+        })
       });
       await session.start({
         meetingId,
@@ -72,7 +81,6 @@ export function registerRecordingIpc({ store }: RecordingIpcContext): void {
     }
 
     const { meetingId, session } = activeSession;
-    activeSession = undefined;
     const stopResult = await session.stop();
     const metadata = await store.readMetadata(meetingId);
     const now = new Date().toISOString();
@@ -87,11 +95,30 @@ export function registerRecordingIpc({ store }: RecordingIpcContext): void {
       }
     };
     await store.writeMetadata(updatedMetadata);
+    activeSession = undefined;
     return updatedMetadata;
   });
 }
 
-function createDemoAudioCaptureProvider(): AudioCaptureProvider {
+function resolveAudioCaptureProvider({
+  mode,
+  createAudioCaptureProvider
+}: {
+  mode: NonNullable<RecordingIpcContext["audioCaptureMode"]>;
+  createAudioCaptureProvider: RecordingIpcContext["createAudioCaptureProvider"];
+}): AudioCaptureProvider {
+  if (createAudioCaptureProvider) {
+    return createAudioCaptureProvider();
+  }
+
+  if (mode === "demo") {
+    return createDemoAudioCaptureProvider();
+  }
+
+  throw new Error("Audio capture provider must be configured");
+}
+
+export function createDemoAudioCaptureProvider(): AudioCaptureProvider {
   let request: AudioCaptureStartRequest | undefined;
   const errorSubscribers = new Set<(error: AudioCaptureError) => void>();
 

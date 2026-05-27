@@ -29,7 +29,8 @@ export type PostMeetingWorkflowServices = {
 export type ProcessMeetingInput = {
   store: MeetingStore;
   meetingId: MeetingId;
-  services?: Partial<PostMeetingWorkflowServices>;
+  services?: PostMeetingWorkflowServices;
+  mode?: "production" | "demo";
   onStepChange?: (step: ProcessingStep) => void;
 };
 
@@ -43,12 +44,10 @@ export async function processMeeting({
   store,
   meetingId,
   services,
+  mode = "production",
   onStepChange
 }: ProcessMeetingInput): Promise<ProcessMeetingResult> {
-  const workflowServices = {
-    ...createDemoWorkflowServices(),
-    ...services
-  };
+  const workflowServices = resolveWorkflowServices({ mode, services });
   const paths = store.getMeetingPaths(meetingId);
   let metadata = await store.readMetadata(meetingId);
 
@@ -150,6 +149,24 @@ export async function processMeeting({
     });
     throw error;
   }
+}
+
+function resolveWorkflowServices({
+  mode,
+  services
+}: {
+  mode: ProcessMeetingInput["mode"];
+  services: ProcessMeetingInput["services"];
+}): PostMeetingWorkflowServices {
+  if (services) {
+    return services;
+  }
+
+  if (mode === "demo") {
+    return createDemoWorkflowServices();
+  }
+
+  throw new Error("Post-meeting workflow services must be configured");
 }
 
 export function createDemoWorkflowServices(): PostMeetingWorkflowServices {
