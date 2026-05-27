@@ -1,5 +1,5 @@
 import { mkdtemp, rm, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { createMeetingStore } from "./meetingStore";
 
@@ -86,3 +86,49 @@ test("persists meeting metadata as JSON", async () => {
     await rm(baseDirectory, { force: true, recursive: true });
   }
 });
+
+test.each(["../outside", "..\\outside", "nested/id", ""])(
+  "rejects unsafe meeting id %j without creating files outside the meetings root",
+  async (unsafeId) => {
+    const baseDirectory = await createTempMeetingDirectory();
+    const outsidePath = join(dirname(baseDirectory), "outside");
+
+    try {
+      const store = createMeetingStore(baseDirectory);
+
+      expect(() => store.getMeetingPaths(unsafeId)).toThrow("Invalid meeting id");
+      await expect(
+        store.createMeeting({
+          id: unsafeId,
+          title: "Unsafe",
+          outputLanguage: "auto"
+        })
+      ).rejects.toThrow("Invalid meeting id");
+      await expect(store.readMetadata(unsafeId)).rejects.toThrow("Invalid meeting id");
+      await expect(
+        store.writeMetadata({
+          id: unsafeId,
+          title: "Unsafe",
+          status: "setup",
+          outputLanguage: "auto",
+          timestamps: {
+            createdAt: "2026-05-27T06:00:00.000Z",
+            updatedAt: "2026-05-27T06:00:00.000Z"
+          },
+          audioTracks: {},
+          transcriptPath: null,
+          structurePath: null,
+          exportPaths: {
+            wordSummaryPath: null,
+            htmlMeetingMapPath: null
+          }
+        })
+      ).rejects.toThrow("Invalid meeting id");
+
+      await expect(pathExists(outsidePath)).resolves.toBe(false);
+    } finally {
+      await rm(baseDirectory, { force: true, recursive: true });
+      await rm(outsidePath, { force: true, recursive: true });
+    }
+  }
+);

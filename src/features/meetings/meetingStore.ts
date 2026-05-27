@@ -1,11 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import type {
   MeetingId,
   MeetingMetadata,
   MeetingPaths
 } from "./meetingTypes";
+
+const SAFE_MEETING_ID_PATTERN = /^[A-Za-z0-9_-]+$/;
 
 export type CreateMeetingInput = {
   id?: MeetingId;
@@ -20,9 +22,33 @@ export type MeetingStore = {
   getMeetingPaths(id: MeetingId): MeetingPaths;
 };
 
+function validateMeetingId(id: MeetingId): void {
+  if (!SAFE_MEETING_ID_PATTERN.test(id)) {
+    throw new Error("Invalid meeting id");
+  }
+}
+
+function assertInsideBaseDirectory(baseDirectory: string, path: string): void {
+  const relativePath = relative(baseDirectory, path);
+
+  if (
+    relativePath === "" ||
+    relativePath.startsWith("..") ||
+    isAbsolute(relativePath)
+  ) {
+    throw new Error("Invalid meeting id");
+  }
+}
+
 export function createMeetingStore(baseDirectory: string): MeetingStore {
+  const resolvedBaseDirectory = resolve(baseDirectory);
+
   function getMeetingPaths(id: MeetingId): MeetingPaths {
-    const meetingDir = join(baseDirectory, id);
+    validateMeetingId(id);
+
+    const meetingDir = resolve(resolvedBaseDirectory, id);
+    assertInsideBaseDirectory(resolvedBaseDirectory, meetingDir);
+
     const audioDir = join(meetingDir, "audio");
     const exportsDir = join(meetingDir, "exports");
 
