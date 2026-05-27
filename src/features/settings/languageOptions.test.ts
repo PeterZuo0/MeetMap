@@ -2,7 +2,8 @@ import {
   DEFAULT_LANGUAGE_OPTION,
   LANGUAGE_OPTIONS,
   LANGUAGE_OPTION_LABELS,
-  getLanguageOption
+  getLanguageOption,
+  parseLanguageOption
 } from "./languageOptions";
 
 test("defines stable language option values and labels", () => {
@@ -33,4 +34,9 @@ test("looks up language options by value", () => {
     label: "Bilingual"
   });
   expect(getLanguageOption("auto")).toEqual({ value: "auto", label: "Auto" });
+});
+
+test("parses external language option values", () => {
+  expect(parseLanguageOption("zh")).toEqual({ value: "zh", label: "Chinese" });
+  expect(parseLanguageOption("unsupported")).toBeUndefined();
 });

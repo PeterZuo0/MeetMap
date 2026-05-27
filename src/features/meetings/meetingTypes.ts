@@ -28,8 +28,8 @@ export type MeetingTimestamps = {
   failedAt?: string;
 };
 
-export type AudioTrackMetadata = {
-  id: AudioTrackId;
+export type AudioTrackMetadata<TrackId extends AudioTrackId = AudioTrackId> = {
+  id: TrackId;
   filePath: string;
   format: "wav";
   hasAudio: boolean;
@@ -37,6 +37,10 @@ export type AudioTrackMetadata = {
   channelCount?: number;
   durationMs?: number;
   byteLength?: number;
+};
+
+export type MeetingAudioTracks = {
+  [TrackId in AudioTrackId]?: AudioTrackMetadata<TrackId>;
 };
 
 export type MeetingExportPaths = {
@@ -50,7 +54,7 @@ export type MeetingMetadata = {
   status: MeetingStatus;
   outputLanguage: LanguageOptionValue;
   timestamps: MeetingTimestamps;
-  audioTracks: Partial<Record<AudioTrackId, AudioTrackMetadata>>;
+  audioTracks: MeetingAudioTracks;
   transcriptPath: string | null;
   structurePath: string | null;
   exportPaths: MeetingExportPaths;
