@@ -22,8 +22,8 @@ npm-debug.log*
 pnpm-debug.log*
 *.tsbuildinfo
 
-exports/
-exports/**/*.docx
-exports/**/*.html
+/exports/
+/exports/**/*.docx
+/exports/**/*.html
 meetings/**/*.docx
 meetings/**/*.html
