@@ -48,6 +48,19 @@ export type MeetingExportPaths = {
   htmlMeetingMapPath: string | null;
 };
 
+export type MeetingPaths = {
+  meetingDir: string;
+  metadataPath: string;
+  audioDir: string;
+  chunksDir: string;
+  exportsDir: string;
+  logsDir: string;
+  transcriptPath: string;
+  structurePath: string;
+  wordExportPath: string;
+  htmlMapExportPath: string;
+};
+
 export type MeetingMetadata = {
   id: MeetingId;
   title: string;
