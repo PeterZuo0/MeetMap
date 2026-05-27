@@ -117,10 +117,11 @@ test("maps meeting structure JSON to ordered Word summary sections", () => {
   ]);
 });
 
-test("creates a DOCX buffer from meeting structure sections", async () => {
-  const buffer = await createWordSummaryDocx(meetingStructure());
+test("creates renderer-safe DOCX bytes from meeting structure sections", async () => {
+  const bytes = await createWordSummaryDocx(meetingStructure());
 
-  expect(buffer).toBeInstanceOf(Buffer);
-  expect(buffer.byteLength).toBeGreaterThan(0);
-  expect(buffer.subarray(0, 2).toString("utf8")).toBe("PK");
+  expect(bytes).toBeInstanceOf(Uint8Array);
+  expect(bytes).not.toBeInstanceOf(Buffer);
+  expect(bytes.byteLength).toBeGreaterThan(0);
+  expect(Array.from(bytes.subarray(0, 4))).toEqual([0x50, 0x4b, 0x03, 0x04]);
 });

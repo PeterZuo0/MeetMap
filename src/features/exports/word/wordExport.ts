@@ -6,7 +6,7 @@ export type WordExportSection = {
   items: string[];
 };
 
-export async function createWordSummaryDocx(structure: MeetingStructure): Promise<Buffer> {
+export async function createWordSummaryDocx(structure: MeetingStructure): Promise<Uint8Array> {
   const document = new Document({
     title: structure.metadata.title,
     creator: "MeetMap",
@@ -23,7 +23,7 @@ export async function createWordSummaryDocx(structure: MeetingStructure): Promis
     ]
   });
 
-  return Packer.toBuffer(document);
+  return new Uint8Array(await Packer.toArrayBuffer(document));
 }
 
 export function buildWordExportSections(structure: MeetingStructure): WordExportSection[] {
