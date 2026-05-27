@@ -1,4 +1,4 @@
-import type { AudioTrackId } from "../meetings/meetingTypes";
+import type { AudioTrackId } from "../meetings/meetingTypes.js";
 
 export type VoiceActivityOutcome =
   | "both-active"

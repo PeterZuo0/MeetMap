@@ -5,7 +5,7 @@ import type {
   MeetingId,
   MeetingMetadata,
   MeetingPaths
-} from "./meetingTypes";
+} from "./meetingTypes.js";
 
 const SAFE_MEETING_ID_PATTERN = /^[A-Za-z0-9_-]+$/;
 

@@ -1,5 +1,5 @@
 import { Document, HeadingLevel, Packer, Paragraph } from "docx";
-import type { MeetingStructure } from "../../intelligence/meetingStructure";
+import type { MeetingStructure } from "../../intelligence/meetingStructure.js";
 
 export type WordExportSection = {
   title: string;

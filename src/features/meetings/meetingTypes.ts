@@ -1,4 +1,4 @@
-import type { LanguageOptionValue } from "../settings/languageOptions";
+import type { LanguageOptionValue } from "../settings/languageOptions.js";
 
 export const MEETING_STATUS_VALUES = [
   "setup",
@@ -11,6 +11,20 @@ export const MEETING_STATUS_VALUES = [
 ] as const;
 
 export type MeetingStatus = (typeof MEETING_STATUS_VALUES)[number];
+
+export const PROCESSING_STEP_VALUES = [
+  "activity_detection",
+  "transcription",
+  "merge",
+  "structure_extraction",
+  "word_export",
+  "html_map_export",
+  "completed",
+  "no_audio",
+  "failed"
+] as const;
+
+export type ProcessingStep = (typeof PROCESSING_STEP_VALUES)[number];
 
 export const AUDIO_TRACK_ID_VALUES = ["system", "microphone"] as const;
 
@@ -65,6 +79,7 @@ export type MeetingMetadata = {
   id: MeetingId;
   title: string;
   status: MeetingStatus;
+  processingStep?: ProcessingStep;
   outputLanguage: LanguageOptionValue;
   timestamps: MeetingTimestamps;
   audioTracks: MeetingAudioTracks;

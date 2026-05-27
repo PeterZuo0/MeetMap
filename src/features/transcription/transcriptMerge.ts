@@ -1,5 +1,5 @@
-import type { AudioTrackId } from "../meetings/meetingTypes";
-import type { TranscriptSegment } from "./transcriptionTypes";
+import type { AudioTrackId } from "../meetings/meetingTypes.js";
+import type { TranscriptSegment } from "./transcriptionTypes.js";
 
 const TRACK_SORT_ORDER: Record<AudioTrackId, number> = {
   system: 0,

@@ -1,5 +1,5 @@
-import type { MeetingStructure } from "../../intelligence/meetingStructure";
-import { assertValidMeetingGraph, buildMeetingGraph, type MeetingGraph } from "./graphModel";
+import type { MeetingStructure } from "../../intelligence/meetingStructure.js";
+import { assertValidMeetingGraph, buildMeetingGraph, type MeetingGraph } from "./graphModel.js";
 
 const GRAPH_DATA_TOKEN = "__MEETMAP_GRAPH_JSON__";
 

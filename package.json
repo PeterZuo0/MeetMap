@@ -4,7 +4,7 @@
   "private": true,
   "description": "Windows-first desktop meeting assistant for meeting capture, transcription, summaries, and maps.",
   "type": "module",
-  "main": "dist-electron/main.js",
+  "main": "dist-electron/electron/main.js",
   "scripts": {
     "dev": "pnpm build && electron .",
     "build": "tsc --noEmit && vite build && tsc -p tsconfig.electron.json",

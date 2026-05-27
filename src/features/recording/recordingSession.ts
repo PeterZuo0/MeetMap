@@ -4,8 +4,8 @@ import type {
   AudioCaptureStopResult,
   AudioCaptureUnsubscribe,
   RecordingTrackSnapshots
-} from "./audioCaptureProvider";
-import type { MeetingAudioTracks, MeetingId } from "../meetings/meetingTypes";
+} from "./audioCaptureProvider.js";
+import type { MeetingAudioTracks, MeetingId } from "../meetings/meetingTypes.js";
 
 export type IdleRecordingSessionState = {
   status: "idle";

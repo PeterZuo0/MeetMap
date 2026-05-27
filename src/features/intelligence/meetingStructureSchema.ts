@@ -3,7 +3,7 @@ import type {
   MeetingRelationType,
   MeetingStructure,
   RiskSeverity
-} from "./meetingStructure";
+} from "./meetingStructure.js";
 
 export type MeetingStructureValidationResult = {
   success: boolean;

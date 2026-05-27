@@ -1,10 +1,14 @@
 import { app, BrowserWindow } from "electron";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { createMeetingStore } from "../src/features/meetings/meetingStore.js";
+import { registerMeetingIpc } from "./ipc/meetingIpc.js";
+import { registerRecordingIpc } from "./ipc/recordingIpc.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
+const meetingStore = createMeetingStore(path.join(app.getPath("userData"), "meetings"));
 
 function createMainWindow() {
   const window = new BrowserWindow({
@@ -28,10 +32,12 @@ function createMainWindow() {
     return;
   }
 
-  void window.loadFile(path.join(__dirname, "../dist/index.html"));
+  void window.loadFile(path.join(__dirname, "../../dist/index.html"));
 }
 
 app.whenReady().then(() => {
+  registerMeetingIpc({ store: meetingStore });
+  registerRecordingIpc({ store: meetingStore });
   createMainWindow();
 
   app.on("activate", () => {

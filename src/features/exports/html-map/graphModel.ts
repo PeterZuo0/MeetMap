@@ -7,7 +7,7 @@ import type {
   MeetingRelationType,
   MeetingRisk,
   MeetingStructure
-} from "../../intelligence/meetingStructure";
+} from "../../intelligence/meetingStructure.js";
 
 export type MeetingGraphNode = {
   id: string;

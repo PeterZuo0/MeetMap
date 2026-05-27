@@ -3,7 +3,7 @@ import type {
   AudioTrackMetadata,
   MeetingAudioTracks,
   MeetingId
-} from "../meetings/meetingTypes";
+} from "../meetings/meetingTypes.js";
 
 export type AudioCaptureDevice = {
   id: string;
