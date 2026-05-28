@@ -1,6 +1,7 @@
 import { stat } from "node:fs/promises";
 import { ipcMain, shell } from "electron";
-import type { MeetingMetadata } from "../../src/features/meetings/meetingTypes.js";
+import type { MeetingMetadata, SummaryStyle } from "../../src/features/meetings/meetingTypes.js";
+import { SUMMARY_STYLE_VALUES } from "../../src/features/meetings/meetingTypes.js";
 import type { MeetingStore } from "../../src/features/meetings/meetingStore.js";
 import { parseLanguageOption } from "../../src/features/settings/languageOptions.js";
 import {
@@ -11,6 +12,7 @@ import {
 export type CreateMeetingIpcInput = {
   title: string;
   outputLanguage: string;
+  summaryStyle?: string;
 };
 
 export type OpenExportIpcInput = {
@@ -45,7 +47,8 @@ export function registerMeetingIpc({
 
       return store.createMeeting({
         title,
-        outputLanguage: language.value
+        outputLanguage: language.value,
+        summaryStyle: parseSummaryStyle(input.summaryStyle)
       });
     }
   );
@@ -92,4 +95,16 @@ export function registerMeetingIpc({
       throw new Error(openResult);
     }
   });
+}
+
+function parseSummaryStyle(value: string | undefined): SummaryStyle {
+  if (!value) {
+    return "decisions_actions";
+  }
+
+  if (SUMMARY_STYLE_VALUES.includes(value as SummaryStyle)) {
+    return value as SummaryStyle;
+  }
+
+  throw new Error(`Unsupported summary style: ${value}`);
 }

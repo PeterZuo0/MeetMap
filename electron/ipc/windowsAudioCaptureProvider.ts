@@ -6,6 +6,7 @@ import type { EventEmitter } from "node:events";
 import type {
   AudioCaptureDevice,
   AudioCaptureError,
+  AudioLevelUpdate,
   AudioCaptureProvider,
   AudioCaptureStartRequest,
   AudioCaptureStopResult,
@@ -24,7 +25,7 @@ export type WindowsAudioCaptureSpawn = (
 ) => WindowsAudioCaptureChildProcess;
 
 export type WindowsAudioCaptureProviderOptions = {
-  projectPath?: string;
+  helperPath?: string;
   spawn?: WindowsAudioCaptureSpawn;
   stat?: (filePath: string) => Promise<{ size: number }>;
   now?: () => number;
@@ -41,7 +42,7 @@ type ActiveCapture = {
 const WAV_HEADER_BYTE_LENGTH = 44;
 
 export function createWindowsAudioCaptureProvider({
-  projectPath = join(
+  helperPath = join(
     process.cwd(),
     "native",
     "windows-audio",
@@ -53,6 +54,7 @@ export function createWindowsAudioCaptureProvider({
   now = Date.now
 }: WindowsAudioCaptureProviderOptions = {}): AudioCaptureProvider {
   const errorSubscribers = new Set<(error: AudioCaptureError) => void>();
+  const levelSubscribers = new Set<(update: AudioLevelUpdate) => void>();
   let activeCapture: ActiveCapture | undefined;
 
   return {
@@ -78,26 +80,21 @@ export function createWindowsAudioCaptureProvider({
         throw new Error("Windows audio capture is already active");
       }
 
-      if (!request.tracks.system || !request.tracks.microphone) {
-        throw new Error("Windows audio capture requires system and microphone tracks");
+      if (!request.tracks.system && !request.tracks.microphone) {
+        throw new Error("Windows audio capture requires at least one audio track");
       }
 
+      const args = [
+        "--wait-for-stdin-stop"
+      ];
+      if (request.tracks.system) {
+        args.push("--system-output", request.tracks.system.filePath);
+      }
+      if (request.tracks.microphone) {
+        args.push("--microphone-output", request.tracks.microphone.filePath);
+      }
       const output: string[] = [];
-      const child = spawn(
-        "dotnet",
-        [
-          "run",
-          "--project",
-          projectPath,
-          "--",
-          "--system-output",
-          request.tracks.system.filePath,
-          "--microphone-output",
-          request.tracks.microphone.filePath,
-          "--wait-for-stdin-stop"
-        ],
-        { windowsHide: true }
-      );
+      const child = spawnCaptureHelper(helperPath, args, spawn);
 
       activeCapture = {
         request,
@@ -107,7 +104,12 @@ export function createWindowsAudioCaptureProvider({
         output
       };
 
-      subscribeToOutput(child.stdout, output);
+      subscribeToOutput(child.stdout, output, (line) => {
+        const update = parseLevelLine(line);
+        if (update) {
+          levelSubscribers.forEach((callback) => callback(update));
+        }
+      });
       subscribeToOutput(child.stderr, output);
       child.on("exit", (code) => {
         if (!activeCapture || activeCapture.process !== child) {
@@ -139,34 +141,63 @@ export function createWindowsAudioCaptureProvider({
 
       const durationMs = Math.max(0, now() - capture.startedAtMs);
       const [systemStats, microphoneStats] = await Promise.all([
-        stat(capture.request.tracks.system?.filePath ?? ""),
-        stat(capture.request.tracks.microphone?.filePath ?? "")
+        capture.request.tracks.system
+          ? stat(capture.request.tracks.system.filePath)
+          : Promise.resolve(undefined),
+        capture.request.tracks.microphone
+          ? stat(capture.request.tracks.microphone.filePath)
+          : Promise.resolve(undefined)
       ]);
 
       return {
         tracks: {
-          system: {
-            id: "system",
-            filePath: capture.request.tracks.system?.filePath ?? "",
-            format: "wav",
-            hasAudio: systemStats.size > WAV_HEADER_BYTE_LENGTH,
-            durationMs,
-            byteLength: systemStats.size
-          },
-          microphone: {
-            id: "microphone",
-            filePath: capture.request.tracks.microphone?.filePath ?? "",
-            format: "wav",
-            hasAudio: microphoneStats.size > WAV_HEADER_BYTE_LENGTH,
-            durationMs,
-            byteLength: microphoneStats.size
-          }
+          system:
+            capture.request.tracks.system && systemStats
+              ? {
+                  id: "system",
+                  filePath: capture.request.tracks.system.filePath,
+                  format: "wav",
+                  hasAudio: systemStats.size > WAV_HEADER_BYTE_LENGTH,
+                  durationMs,
+                  byteLength: systemStats.size
+                }
+              : undefined,
+          microphone:
+            capture.request.tracks.microphone && microphoneStats
+              ? {
+                  id: "microphone",
+                  filePath: capture.request.tracks.microphone.filePath,
+                  format: "wav",
+                  hasAudio: microphoneStats.size > WAV_HEADER_BYTE_LENGTH,
+                  durationMs,
+                  byteLength: microphoneStats.size
+                }
+              : undefined
         }
       };
     },
 
-    onLevel(): AudioCaptureUnsubscribe {
-      return () => undefined;
+    async pause(): Promise<void> {
+      if (!activeCapture) {
+        throw new Error("Windows audio capture is not active");
+      }
+
+      activeCapture.process.stdin.write("pause\n");
+    },
+
+    async resume(): Promise<void> {
+      if (!activeCapture) {
+        throw new Error("Windows audio capture is not active");
+      }
+
+      activeCapture.process.stdin.write("resume\n");
+    },
+
+    onLevel(callback): AudioCaptureUnsubscribe {
+      levelSubscribers.add(callback);
+      return () => {
+        levelSubscribers.delete(callback);
+      };
     },
 
     onError(callback): AudioCaptureUnsubscribe {
@@ -178,10 +209,51 @@ export function createWindowsAudioCaptureProvider({
   };
 }
 
-function subscribeToOutput(stream: EventEmitter, output: string[]): void {
+function subscribeToOutput(
+  stream: EventEmitter,
+  output: string[],
+  onLine?: (line: string) => void
+): void {
+  let buffered = "";
   stream.on("data", (chunk: unknown) => {
-    output.push(Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk));
+    const text = Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk);
+    output.push(text);
+    if (!onLine) {
+      return;
+    }
+
+    buffered += text;
+    const lines = buffered.split(/\r?\n/);
+    buffered = lines.pop() ?? "";
+    lines.forEach(onLine);
   });
+}
+
+function spawnCaptureHelper(
+  helperPath: string,
+  args: string[],
+  spawn: WindowsAudioCaptureSpawn
+): WindowsAudioCaptureChildProcess {
+  if (helperPath.toLowerCase().endsWith(".csproj")) {
+    return spawn("dotnet", ["run", "--project", helperPath, "--", ...args], {
+      windowsHide: true
+    });
+  }
+
+  return spawn(helperPath, args, { windowsHide: true });
+}
+
+function parseLevelLine(line: string): AudioLevelUpdate | null {
+  const match = /^LEVEL\s+(system|microphone)\s+([0-9.]+)$/i.exec(line.trim());
+  if (!match) {
+    return null;
+  }
+
+  return {
+    track: match[1].toLowerCase() as "system" | "microphone",
+    level: Number(match[2]),
+    occurredAt: new Date().toISOString()
+  };
 }
 
 function waitForExit(process: WindowsAudioCaptureChildProcess): Promise<number | null> {

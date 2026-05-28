@@ -5,6 +5,7 @@ import type { MeetingMetadata } from "../../src/features/meetings/meetingTypes.j
 import type { MeetingStore } from "../../src/features/meetings/meetingStore.js";
 import type {
   AudioCaptureProvider,
+  AudioCaptureUnsubscribe
 } from "../../src/features/recording/audioCaptureProvider.js";
 import { createRecordingSession } from "../../src/features/recording/recordingSession.js";
 import { createDemoAudioCaptureProvider } from "./demoAudioCaptureProvider.js";
@@ -37,6 +38,7 @@ export function registerRecordingIpc({
     | {
         meetingId: string;
         session: ReturnType<typeof createRecordingSession>;
+        unsubscribeLevel: AudioCaptureUnsubscribe;
       }
     | undefined;
 
@@ -64,30 +66,37 @@ export function registerRecordingIpc({
       await mkdir(paths.audioDir, { recursive: true });
       const requestedSources = normalizeAudioSources(options);
 
-      const session = createRecordingSession({
-        provider: resolveAudioCaptureProvider({
-          mode: audioCaptureMode,
-          createAudioCaptureProvider
-        })
+      const provider = resolveAudioCaptureProvider({
+        mode: audioCaptureMode,
+        createAudioCaptureProvider
       });
-      await session.start({
-        meetingId,
-        tracks: {
-          system: requestedSources.system
-            ? {
-                filePath: join(paths.audioDir, "system.wav"),
-                deviceId: options?.deviceIds?.system
-              }
-            : undefined,
-          microphone: requestedSources.microphone
-            ? {
-                filePath: join(paths.audioDir, "microphone.wav"),
-                deviceId: options?.deviceIds?.microphone
-              }
-            : undefined
-        }
+      const unsubscribeLevel = provider.onLevel((update) => {
+        _event.sender.send("recording:level", update);
       });
-      activeSession = { meetingId, session };
+      const session = createRecordingSession({ provider });
+      try {
+        await session.start({
+          meetingId,
+          tracks: {
+            system: requestedSources.system
+              ? {
+                  filePath: join(paths.audioDir, "system.wav"),
+                  deviceId: options?.deviceIds?.system
+                }
+              : undefined,
+            microphone: requestedSources.microphone
+              ? {
+                  filePath: join(paths.audioDir, "microphone.wav"),
+                  deviceId: options?.deviceIds?.microphone
+                }
+              : undefined
+          }
+        });
+      } catch (error) {
+        unsubscribeLevel();
+        throw error;
+      }
+      activeSession = { meetingId, session, unsubscribeLevel };
 
       const now = new Date().toISOString();
       const updatedMetadata: MeetingMetadata = {
@@ -109,7 +118,7 @@ export function registerRecordingIpc({
       throw new Error("No recording is active");
     }
 
-    const { meetingId, session } = activeSession;
+    const { meetingId, session, unsubscribeLevel } = activeSession;
     try {
       const stopResult = await session.stop();
       const metadata = await store.readMetadata(meetingId);
@@ -138,12 +147,31 @@ export function registerRecordingIpc({
 
       throw error;
     } finally {
+      unsubscribeLevel();
       try {
         await session.dispose();
       } finally {
         activeSession = undefined;
       }
     }
+  });
+
+  ipcMain.handle("recording:pause", async (): Promise<MeetingMetadata> => {
+    if (!activeSession) {
+      throw new Error("No recording is active");
+    }
+
+    await activeSession.session.pause();
+    return store.readMetadata(activeSession.meetingId);
+  });
+
+  ipcMain.handle("recording:resume", async (): Promise<MeetingMetadata> => {
+    if (!activeSession) {
+      throw new Error("No recording is active");
+    }
+
+    await activeSession.session.resume();
+    return store.readMetadata(activeSession.meetingId);
   });
 }
 

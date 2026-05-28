@@ -12,29 +12,36 @@ export function RecordingScreen({
   audioSources,
   error,
   isStopping,
-  onStop
+  isPaused,
+  isPauseChanging,
+  onStop,
+  onOpenAudioSettings,
+  onPauseChange
 }: {
   lang: UiLanguage;
   meeting: MeetingMetadata | null;
   audioSources: RecordingAudioSources;
   error: string | null;
   isStopping: boolean;
+  isPaused: boolean;
+  isPauseChanging: boolean;
   onStop(): void;
+  onOpenAudioSettings(): void;
+  onPauseChange(paused: boolean): void;
 }) {
   const [elapsed, setElapsed] = useState(0);
-  const [paused, setPaused] = useState(false);
   const [taggedMoments, setTaggedMoments] = useState<Array<{ time: string; text: string }>>([]);
   const audioState = getRecordingAudioState(audioSources);
   const title = meeting?.title ?? "Untitled meeting";
 
   useEffect(() => {
-    if (paused) {
+    if (isPaused) {
       return;
     }
 
     const timer = window.setInterval(() => setElapsed((value) => value + 1), 1000);
     return () => window.clearInterval(timer);
-  }, [paused]);
+  }, [isPaused]);
 
   const elapsedText = formatElapsed(elapsed);
 
@@ -50,7 +57,7 @@ export function RecordingScreen({
             Started 10:30 · <span className="mono-text">{elapsedText}</span> · autosaving every 30s
           </p>
         </div>
-        <StateBanner audioState={audioState} />
+        <StateBanner audioState={audioState} onOpenAudioSettings={onOpenAudioSettings} />
       </div>
 
       {error ? <div className="error-box">{error}</div> : null}
@@ -58,12 +65,12 @@ export function RecordingScreen({
       <div className="recording-console">
         <div className="recording-console-top">
           <div className="recording-clock-wrap">
-            <div className={`big-record-control ${paused ? "paused" : ""}`}>
-              <Icon name={paused ? "pause" : "stop"} size={18} />
+            <div className={`big-record-control ${isPaused ? "paused" : ""}`}>
+              <Icon name={isPaused ? "pause" : "stop"} size={18} />
             </div>
             <div>
               <div className="recording-clock">{elapsedText}</div>
-              <div className="sub">{paused ? "Paused" : stateListeningCopy(audioState)}</div>
+              <div className="sub">{isPaused ? "Paused" : stateListeningCopy(audioState)}</div>
             </div>
           </div>
           <div className="recording-actions">
@@ -80,9 +87,14 @@ export function RecordingScreen({
               <Icon name="pin" size={13} />
               Tag moment <span className="kbd">M</span>
             </button>
-            <button className="btn" onClick={() => setPaused(!paused)} type="button">
-              <Icon name={paused ? "play" : "pause"} size={13} />
-              {paused ? "Resume" : "Pause"}
+            <button
+              className="btn"
+              disabled={isPauseChanging}
+              onClick={() => onPauseChange(!isPaused)}
+              type="button"
+            >
+              <Icon name={isPaused ? "play" : "pause"} size={13} />
+              {isPauseChanging ? "Updating..." : isPaused ? "Resume" : "Pause"}
             </button>
             <button className="btn danger" disabled={isStopping} onClick={onStop} type="button">
               <Icon name="stop" size={13} />
@@ -91,11 +103,11 @@ export function RecordingScreen({
           </div>
         </div>
 
-        <DualTrackWaveform audioState={audioState} paused={paused} />
+        <DualTrackWaveform audioState={audioState} paused={isPaused} />
       </div>
 
       <div className="recording-bottom-grid">
-        <LiveActivity audioState={audioState} paused={paused} />
+        <LiveActivity audioState={audioState} paused={isPaused} />
         <TaggedMoments audioState={audioState} taggedMoments={taggedMoments} />
       </div>
     </section>
@@ -131,7 +143,13 @@ function stateListeningCopy(audioState: RecordingAudioState): string {
   }
 }
 
-function StateBanner({ audioState }: { audioState: RecordingAudioState }) {
+function StateBanner({
+  audioState,
+  onOpenAudioSettings
+}: {
+  audioState: RecordingAudioState;
+  onOpenAudioSettings: () => void;
+}) {
   if (audioState === "both") {
     return (
       <div className="state-banner positive">
@@ -148,7 +166,7 @@ function StateBanner({ audioState }: { audioState: RecordingAudioState }) {
         <span className="state-symbol">!</span>
         <strong>System audio only</strong>
         <span>Microphone is silent or disabled · one-sided transcript</span>
-        <button className="link-button" type="button">Fix</button>
+        <button className="link-button" onClick={onOpenAudioSettings} type="button">Fix</button>
       </div>
     );
   }
@@ -159,7 +177,7 @@ function StateBanner({ audioState }: { audioState: RecordingAudioState }) {
         <span className="state-symbol">!</span>
         <strong>Microphone only</strong>
         <span>No system audio · voice memo style processing</span>
-        <button className="link-button" type="button">Fix</button>
+        <button className="link-button" onClick={onOpenAudioSettings} type="button">Fix</button>
       </div>
     );
   }
@@ -169,7 +187,7 @@ function StateBanner({ audioState }: { audioState: RecordingAudioState }) {
       <span className="state-symbol">!</span>
       <strong>No audio detected</strong>
       <span>Both tracks are silent · check devices</span>
-      <button className="link-button" type="button">Devices</button>
+      <button className="link-button" onClick={onOpenAudioSettings} type="button">Devices</button>
     </div>
   );
 }

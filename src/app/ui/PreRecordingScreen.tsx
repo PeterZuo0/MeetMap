@@ -1,6 +1,6 @@
 import type { LanguageOptionValue } from "../../features/settings/languageOptions";
 import { LANGUAGE_OPTIONS } from "../../features/settings/languageOptions";
-import type { AudioTrackId } from "../../features/meetings/meetingTypes";
+import type { AudioTrackId, SummaryStyle } from "../../features/meetings/meetingTypes";
 import type { ReactNode } from "react";
 import type { RecordingAudioDevice, RecordingAudioSources, UiLanguage } from "../meetMapApi";
 import { label } from "./copy";
@@ -10,6 +10,7 @@ export function PreRecordingScreen({
   lang,
   title,
   outputLanguage,
+  summaryStyle,
   audioSources,
   devices,
   selectedDeviceIds,
@@ -17,14 +18,17 @@ export function PreRecordingScreen({
   isStarting,
   onTitleChange,
   onOutputLanguageChange,
+  onSummaryStyleChange,
   onAudioSourcesChange,
   onDeviceChange,
   onStart,
-  onCancel
+  onCancel,
+  onOpenPrivacySettings
 }: {
   lang: UiLanguage;
   title: string;
   outputLanguage: LanguageOptionValue;
+  summaryStyle: SummaryStyle;
   audioSources: RecordingAudioSources;
   devices: RecordingAudioDevice[];
   selectedDeviceIds: Partial<Record<AudioTrackId, string>>;
@@ -32,10 +36,12 @@ export function PreRecordingScreen({
   isStarting: boolean;
   onTitleChange(title: string): void;
   onOutputLanguageChange(language: LanguageOptionValue): void;
+  onSummaryStyleChange(summaryStyle: SummaryStyle): void;
   onAudioSourcesChange(sources: RecordingAudioSources): void;
   onDeviceChange(track: AudioTrackId, deviceId: string): void;
   onStart(): void;
   onCancel(): void;
+  onOpenPrivacySettings(): void;
 }) {
   const canStart = audioSources.system || audioSources.microphone;
   const sourceStatus = getSourceStatus(audioSources);
@@ -157,9 +163,14 @@ export function PreRecordingScreen({
         </PreSettingsRow>
         <PreSettingsRow labelText="Summary style" last>
           <div className="inline-options wrap">
-            {["Decisions & actions", "Topic outline", "Q&A", "Highlights"].map((option, index) => (
-              <button className={`btn small ${index === 0 ? "soft-active" : ""}`} key={option} type="button">
-                {option}
+            {SUMMARY_STYLE_OPTIONS.map((option) => (
+              <button
+                className={`btn small ${summaryStyle === option.value ? "soft-active" : ""}`}
+                key={option.value}
+                onClick={() => onSummaryStyleChange(option.value)}
+                type="button"
+              >
+                {option.label}
               </button>
             ))}
           </div>
@@ -171,11 +182,18 @@ export function PreRecordingScreen({
         <span>
           Recording stays on your PC. Cloud APIs only receive audio after you stop and process, and only for the tracks you keep.
         </span>
-        <button className="link-button" type="button">Privacy settings</button>
+        <button className="link-button" onClick={onOpenPrivacySettings} type="button">Privacy settings</button>
       </div>
     </section>
   );
 }
+
+const SUMMARY_STYLE_OPTIONS: Array<{ label: string; value: SummaryStyle }> = [
+  { label: "Decisions & actions", value: "decisions_actions" },
+  { label: "Topic outline", value: "topic_outline" },
+  { label: "Q&A", value: "qa" },
+  { label: "Highlights", value: "highlights" }
+];
 
 function getSourceStatus(audioSources: RecordingAudioSources): { label: string; tone: "positive" | "warn" | "danger" } {
   if (audioSources.system && audioSources.microphone) {

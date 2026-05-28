@@ -75,6 +75,7 @@ function createInstructions(request: MeetingStructureRequest): string {
   return [
     "Extract a structured meeting summary from the transcript.",
     `Write the final summary, topic titles, decisions, action items, questions, and risks in ${request.outputLanguage}.`,
+    `Use the requested summary style: ${formatSummaryStyle(request.summaryStyle)}.`,
     "Preserve transcript source references by using the provided segment ids and timestamps.",
     "Return only JSON that matches the meeting_structure schema."
   ].join(" ");
@@ -87,10 +88,24 @@ function createInput(request: MeetingStructureRequest): string {
       title: request.title,
       startedAt: request.startedAt,
       endedAt: request.endedAt,
-      outputLanguage: request.outputLanguage
+      outputLanguage: request.outputLanguage,
+      summaryStyle: request.summaryStyle
     },
     transcript: request.transcript
   });
+}
+
+function formatSummaryStyle(summaryStyle: MeetingStructureRequest["summaryStyle"]): string {
+  switch (summaryStyle) {
+    case "decisions_actions":
+      return "decisions and action items first";
+    case "topic_outline":
+      return "topic outline first";
+    case "qa":
+      return "questions and answers first";
+    case "highlights":
+      return "highlights first";
+  }
 }
 
 function parseProviderOutput(

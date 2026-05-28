@@ -45,6 +45,8 @@ export type AudioCaptureUnsubscribe = () => void;
 export type AudioCaptureProvider = {
   listDevices(): Promise<AudioCaptureDevice[]>;
   start(request: AudioCaptureStartRequest): Promise<void>;
+  pause?(): Promise<void>;
+  resume?(): Promise<void>;
   stop(): Promise<AudioCaptureStopResult>;
   onLevel(callback: (update: AudioLevelUpdate) => void): AudioCaptureUnsubscribe;
   onError(callback: (error: AudioCaptureError) => void): AudioCaptureUnsubscribe;

@@ -31,9 +31,13 @@ test.each([
     <RecordingScreen
       audioSources={audioSources}
       error={null}
+      isPaused={false}
+      isPauseChanging={false}
       isStopping={false}
       lang="en"
       meeting={meeting}
+      onOpenAudioSettings={vi.fn()}
+      onPauseChange={vi.fn()}
       onStop={vi.fn()}
     />
   );
@@ -46,9 +50,13 @@ test("adds tagged moments from the recording controls", () => {
     <RecordingScreen
       audioSources={{ system: true, microphone: true }}
       error={null}
+      isPaused={false}
+      isPauseChanging={false}
       isStopping={false}
       lang="en"
       meeting={meeting}
+      onOpenAudioSettings={vi.fn()}
+      onPauseChange={vi.fn()}
       onStop={vi.fn()}
     />
   );
@@ -56,4 +64,43 @@ test("adds tagged moments from the recording controls", () => {
   fireEvent.click(screen.getByRole("button", { name: /Tag moment/ }));
 
   expect(screen.getByText(/Marked moment 1/)).toBeInTheDocument();
+});
+
+test("requests real pause and resume from the recording controls", () => {
+  const onPauseChange = vi.fn();
+  const { rerender } = render(
+    <RecordingScreen
+      audioSources={{ system: true, microphone: true }}
+      error={null}
+      isPaused={false}
+      isPauseChanging={false}
+      isStopping={false}
+      lang="en"
+      meeting={meeting}
+      onOpenAudioSettings={vi.fn()}
+      onPauseChange={onPauseChange}
+      onStop={vi.fn()}
+    />
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: /Pause/ }));
+  expect(onPauseChange).toHaveBeenCalledWith(true);
+
+  rerender(
+    <RecordingScreen
+      audioSources={{ system: true, microphone: true }}
+      error={null}
+      isPaused
+      isPauseChanging={false}
+      isStopping={false}
+      lang="en"
+      meeting={meeting}
+      onOpenAudioSettings={vi.fn()}
+      onPauseChange={onPauseChange}
+      onStop={vi.fn()}
+    />
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: /Resume/ }));
+  expect(onPauseChange).toHaveBeenCalledWith(false);
 });

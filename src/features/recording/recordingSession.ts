@@ -23,6 +23,12 @@ export type RecordingSessionActiveState = {
   tracks: RecordingTrackSnapshots;
 };
 
+export type PausedRecordingSessionState = {
+  status: "paused";
+  meetingId: MeetingId;
+  tracks: RecordingTrackSnapshots;
+};
+
 export type StoppingRecordingSessionState = {
   status: "stopping";
   meetingId: MeetingId;
@@ -51,6 +57,7 @@ export type RecordingSessionState =
   | IdleRecordingSessionState
   | StartingRecordingSessionState
   | RecordingSessionActiveState
+  | PausedRecordingSessionState
   | StoppingRecordingSessionState
   | StoppedRecordingSessionState
   | ProcessingReadyRecordingSessionState
@@ -64,6 +71,8 @@ export type RecordingSessionOptions = {
 export type RecordingSession = {
   readonly state: RecordingSessionState;
   start(request: AudioCaptureStartRequest): Promise<void>;
+  pause(): Promise<void>;
+  resume(): Promise<void>;
   stop(): Promise<AudioCaptureStopResult>;
   dispose(): Promise<void>;
 };
@@ -126,13 +135,13 @@ export function createRecordingSession({
 
   subscriptions.push(
     provider.onError((captureError) => {
-      if (state.status !== "recording" && state.status !== "stopping") {
+      if (state.status !== "recording" && state.status !== "paused" && state.status !== "stopping") {
         return;
       }
 
       activeCaptureError = captureError.error;
       const meetingId =
-        state.status === "recording" || state.status === "stopping"
+        state.status === "recording" || state.status === "paused" || state.status === "stopping"
           ? state.meetingId
           : undefined;
       setState({
@@ -186,8 +195,42 @@ export function createRecordingSession({
       }
     },
 
-    async stop(): Promise<AudioCaptureStopResult> {
+    async pause(): Promise<void> {
       if (state.status !== "recording") {
+        throw new Error(`Cannot pause recording from ${state.status}`);
+      }
+      if (!provider.pause) {
+        throw new Error("Audio capture provider does not support pause");
+      }
+
+      const recordingState = state;
+      await provider.pause();
+      setState({
+        status: "paused",
+        meetingId: recordingState.meetingId,
+        tracks: recordingState.tracks
+      });
+    },
+
+    async resume(): Promise<void> {
+      if (state.status !== "paused") {
+        throw new Error(`Cannot resume recording from ${state.status}`);
+      }
+      if (!provider.resume) {
+        throw new Error("Audio capture provider does not support resume");
+      }
+
+      const pausedState = state;
+      await provider.resume();
+      setState({
+        status: "recording",
+        meetingId: pausedState.meetingId,
+        tracks: pausedState.tracks
+      });
+    },
+
+    async stop(): Promise<AudioCaptureStopResult> {
+      if (state.status !== "recording" && state.status !== "paused") {
         throw new Error(`Cannot stop recording from ${state.status}`);
       }
 
@@ -236,7 +279,7 @@ export function createRecordingSession({
           }
         }
 
-        if (state.status === "recording") {
+        if (state.status === "recording" || state.status === "paused") {
           await this.stop();
         }
       } finally {

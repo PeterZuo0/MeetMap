@@ -1,11 +1,12 @@
 using NAudio.Wave;
 using NAudio.Wave.SampleProviders;
+using System.Globalization;
 
 namespace MeetMap.WindowsAudio;
 
 internal sealed record CaptureOptions(
-  string SystemOutputPath,
-  string MicrophoneOutputPath,
+  string? SystemOutputPath,
+  string? MicrophoneOutputPath,
   TimeSpan Duration,
   int? MicrophoneDeviceNumber,
   bool WaitForStdinStop
@@ -30,8 +31,14 @@ internal static class Program
       var options = ParseOptions(args);
       await CaptureAsync(options);
       Console.WriteLine("Capture complete.");
-      Console.WriteLine($"System audio: {options.SystemOutputPath}");
-      Console.WriteLine($"Microphone: {options.MicrophoneOutputPath}");
+      if (options.SystemOutputPath is not null)
+      {
+        Console.WriteLine($"System audio: {options.SystemOutputPath}");
+      }
+      if (options.MicrophoneOutputPath is not null)
+      {
+        Console.WriteLine($"Microphone: {options.MicrophoneOutputPath}");
+      }
       return Success;
     }
     catch (ArgumentException error)
@@ -74,8 +81,13 @@ internal static class Program
       values[key] = args[++index];
     }
 
-    var systemOutput = Required(values, "--system-output");
-    var microphoneOutput = Required(values, "--microphone-output");
+    var systemOutput = Optional(values, "--system-output");
+    var microphoneOutput = Optional(values, "--microphone-output");
+    if (systemOutput is null && microphoneOutput is null)
+    {
+      throw new ArgumentException("At least one of --system-output or --microphone-output is required.");
+    }
+
     var durationSeconds = values.TryGetValue("--duration-seconds", out var durationValue)
       ? ParsePositiveDouble(durationValue, "--duration-seconds")
       : 10;
@@ -84,8 +96,8 @@ internal static class Program
       : null;
 
     return new CaptureOptions(
-      Path.GetFullPath(systemOutput),
-      Path.GetFullPath(microphoneOutput),
+      systemOutput is null ? null : Path.GetFullPath(systemOutput),
+      microphoneOutput is null ? null : Path.GetFullPath(microphoneOutput),
       TimeSpan.FromSeconds(durationSeconds),
       microphoneDeviceNumber,
       flags.Contains("--wait-for-stdin-stop")
@@ -94,52 +106,194 @@ internal static class Program
 
   private static async Task CaptureAsync(CaptureOptions options)
   {
-    Directory.CreateDirectory(Path.GetDirectoryName(options.SystemOutputPath) ?? ".");
-    Directory.CreateDirectory(Path.GetDirectoryName(options.MicrophoneOutputPath) ?? ".");
+    WasapiLoopbackCapture? systemCapture = null;
+    WaveInEvent? microphoneCapture = null;
+    WaveFileWriter? systemWriter = null;
+    WaveFileWriter? microphoneWriter = null;
+    var stoppedTasks = new List<Task>();
+    var pauseState = new CapturePauseState();
+    var levelReporter = new LevelReporter();
 
-    using var systemCapture = new WasapiLoopbackCapture();
-    using var microphoneCapture = CreateMicrophoneCapture(options.MicrophoneDeviceNumber);
-    using var systemWriter = new WaveFileWriter(options.SystemOutputPath, systemCapture.WaveFormat);
-    using var microphoneWriter = new WaveFileWriter(options.MicrophoneOutputPath, microphoneCapture.WaveFormat);
-
-    var systemStopped = CreateStoppedTask(systemCapture);
-    var microphoneStopped = CreateStoppedTask(microphoneCapture);
-
-    systemCapture.DataAvailable += (_, eventArgs) =>
-      systemWriter.Write(eventArgs.Buffer, 0, eventArgs.BytesRecorded);
-    microphoneCapture.DataAvailable += (_, eventArgs) =>
-      microphoneWriter.Write(eventArgs.Buffer, 0, eventArgs.BytesRecorded);
-
-    systemCapture.StartRecording();
-    microphoneCapture.StartRecording();
-
-    if (options.WaitForStdinStop)
+    try
     {
-      await WaitForStopCommandAsync();
+      if (options.SystemOutputPath is not null)
+      {
+        Directory.CreateDirectory(Path.GetDirectoryName(options.SystemOutputPath) ?? ".");
+        systemCapture = new WasapiLoopbackCapture();
+        systemWriter = new WaveFileWriter(options.SystemOutputPath, systemCapture.WaveFormat);
+        stoppedTasks.Add(CreateStoppedTask(systemCapture));
+        systemCapture.DataAvailable += (_, eventArgs) =>
+        {
+          if (!pauseState.IsPaused)
+          {
+            systemWriter.Write(eventArgs.Buffer, 0, eventArgs.BytesRecorded);
+            levelReporter.Report("system", eventArgs.Buffer, eventArgs.BytesRecorded, systemCapture.WaveFormat);
+          }
+        };
+        systemCapture.StartRecording();
+      }
+
+      if (options.MicrophoneOutputPath is not null)
+      {
+        Directory.CreateDirectory(Path.GetDirectoryName(options.MicrophoneOutputPath) ?? ".");
+        microphoneCapture = CreateMicrophoneCapture(options.MicrophoneDeviceNumber);
+        microphoneWriter = new WaveFileWriter(options.MicrophoneOutputPath, microphoneCapture.WaveFormat);
+        stoppedTasks.Add(CreateStoppedTask(microphoneCapture));
+        microphoneCapture.DataAvailable += (_, eventArgs) =>
+        {
+          if (!pauseState.IsPaused)
+          {
+            microphoneWriter.Write(eventArgs.Buffer, 0, eventArgs.BytesRecorded);
+            levelReporter.Report("microphone", eventArgs.Buffer, eventArgs.BytesRecorded, microphoneCapture.WaveFormat);
+          }
+        };
+        microphoneCapture.StartRecording();
+      }
+
+      if (options.WaitForStdinStop)
+      {
+        await WaitForCaptureCommandAsync(pauseState);
+      }
+      else
+      {
+        await Task.Delay(options.Duration);
+      }
+
+      systemCapture?.StopRecording();
+      microphoneCapture?.StopRecording();
+      await Task.WhenAll(stoppedTasks);
+
+      systemWriter?.Flush();
+      microphoneWriter?.Flush();
+      if (options.SystemOutputPath is not null)
+      {
+        ValidateWavFile(options.SystemOutputPath, "system");
+      }
+      if (options.MicrophoneOutputPath is not null)
+      {
+        ValidateWavFile(options.MicrophoneOutputPath, "microphone");
+      }
     }
-    else
+    finally
     {
-      await Task.Delay(options.Duration);
+      systemWriter?.Dispose();
+      microphoneWriter?.Dispose();
+      systemCapture?.Dispose();
+      microphoneCapture?.Dispose();
     }
-
-    systemCapture.StopRecording();
-    microphoneCapture.StopRecording();
-    await Task.WhenAll(systemStopped, microphoneStopped);
-
-    systemWriter.Flush();
-    microphoneWriter.Flush();
-    ValidateWavFile(options.SystemOutputPath, "system");
-    ValidateWavFile(options.MicrophoneOutputPath, "microphone");
   }
 
-  private static async Task WaitForStopCommandAsync()
+  private static async Task WaitForCaptureCommandAsync(CapturePauseState pauseState)
   {
     while (await Console.In.ReadLineAsync() is { } line)
     {
-      if (string.Equals(line.Trim(), "stop", StringComparison.OrdinalIgnoreCase))
+      var command = line.Trim();
+      if (string.Equals(command, "pause", StringComparison.OrdinalIgnoreCase))
+      {
+        pauseState.SetPaused(true);
+        continue;
+      }
+      if (string.Equals(command, "resume", StringComparison.OrdinalIgnoreCase))
+      {
+        pauseState.SetPaused(false);
+        continue;
+      }
+      if (string.Equals(command, "stop", StringComparison.OrdinalIgnoreCase))
       {
         return;
       }
+    }
+  }
+
+  private sealed class CapturePauseState
+  {
+    private int paused;
+
+    public bool IsPaused => Volatile.Read(ref paused) == 1;
+
+    public void SetPaused(bool nextPaused)
+    {
+      Volatile.Write(ref paused, nextPaused ? 1 : 0);
+    }
+  }
+
+  private sealed class LevelReporter
+  {
+    private readonly Dictionary<string, DateTimeOffset> lastReportedAt = new(StringComparer.OrdinalIgnoreCase);
+    private readonly object gate = new();
+
+    public void Report(string track, byte[] buffer, int bytesRecorded, WaveFormat waveFormat)
+    {
+      var now = DateTimeOffset.UtcNow;
+      lock (gate)
+      {
+        if (
+          lastReportedAt.TryGetValue(track, out var lastReported) &&
+          now - lastReported < TimeSpan.FromMilliseconds(500)
+        )
+        {
+          return;
+        }
+
+        lastReportedAt[track] = now;
+      }
+
+      Console.WriteLine(
+        string.Create(
+          CultureInfo.InvariantCulture,
+          $"LEVEL {track} {CalculateLevel(buffer, bytesRecorded, waveFormat):0.0000}"
+        )
+      );
+    }
+
+    private static double CalculateLevel(byte[] buffer, int bytesRecorded, WaveFormat waveFormat)
+    {
+      var bytesPerSample = Math.Max(1, waveFormat.BitsPerSample / 8);
+      if (bytesRecorded < bytesPerSample)
+      {
+        return 0;
+      }
+
+      double sumSquares = 0;
+      var sampleCount = 0;
+      for (var index = 0; index + bytesPerSample <= bytesRecorded; index += bytesPerSample)
+      {
+        var sample = ReadSample(buffer, index, waveFormat);
+        sumSquares += sample * sample;
+        sampleCount++;
+      }
+
+      return sampleCount == 0
+        ? 0
+        : Math.Min(1, Math.Sqrt(sumSquares / sampleCount));
+    }
+
+    private static double ReadSample(byte[] buffer, int index, WaveFormat waveFormat)
+    {
+      if (waveFormat.Encoding == WaveFormatEncoding.IeeeFloat && waveFormat.BitsPerSample == 32)
+      {
+        return Math.Clamp(BitConverter.ToSingle(buffer, index), -1, 1);
+      }
+
+      if (waveFormat.Encoding != WaveFormatEncoding.Pcm)
+      {
+        return 0;
+      }
+
+      return waveFormat.BitsPerSample switch
+      {
+        8 => (buffer[index] - 128) / 128.0,
+        16 => BitConverter.ToInt16(buffer, index) / 32768.0,
+        24 => ReadInt24(buffer, index) / 8388608.0,
+        32 => BitConverter.ToInt32(buffer, index) / 2147483648.0,
+        _ => 0
+      };
+    }
+
+    private static int ReadInt24(byte[] buffer, int index)
+    {
+      var value = buffer[index] | (buffer[index + 1] << 8) | (buffer[index + 2] << 16);
+      return (value & 0x800000) != 0 ? value | unchecked((int)0xFF000000) : value;
     }
   }
 
@@ -181,11 +335,11 @@ internal static class Program
     return stopped.Task;
   }
 
-  private static string Required(IReadOnlyDictionary<string, string> values, string key)
+  private static string? Optional(IReadOnlyDictionary<string, string> values, string key)
   {
     return values.TryGetValue(key, out var value) && !string.IsNullOrWhiteSpace(value)
       ? value
-      : throw new ArgumentException($"Missing required argument {key}");
+      : null;
   }
 
   private static double ParsePositiveDouble(string value, string key)
@@ -205,10 +359,10 @@ internal static class Program
   private static void ValidateWavFile(string path, string label)
   {
     var info = new FileInfo(path);
-    if (!info.Exists || info.Length <= 44)
+    if (!info.Exists || info.Length < 44)
     {
       throw new InvalidOperationException(
-        $"The {label} WAV file was not created with audio data. Check that the source is available."
+        $"The {label} WAV file was not created. Check that the source is available."
       );
     }
   }
@@ -219,6 +373,7 @@ internal static class Program
       MeetMap Windows audio capture proof of concept
 
       Required:
+        At least one audio output path:
         --system-output <path>       WAV file for WASAPI loopback system audio
         --microphone-output <path>   WAV file for selected microphone input
 

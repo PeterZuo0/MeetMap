@@ -45,6 +45,25 @@ function getHandler(channel: string): IpcHandler {
   return handler;
 }
 
+test("creates meetings with the selected summary style", async () => {
+  const baseDirectory = await mkdtemp(join(tmpdir(), "meetmap-meeting-ipc-"));
+
+  try {
+    const store = createMeetingStore(baseDirectory);
+    registerMeetingIpc({ store });
+
+    const meeting = await getHandler("meeting:create")(null, {
+      title: "Planning",
+      outputLanguage: "en",
+      summaryStyle: "highlights"
+    } as never);
+
+    expect((meeting as MeetingMetadata).summaryStyle).toBe("highlights");
+  } finally {
+    await rm(baseDirectory, { force: true, recursive: true });
+  }
+});
+
 test("does not process a meeting with silent demo workflow services", async () => {
   const baseDirectory = await mkdtemp(join(tmpdir(), "meetmap-meeting-ipc-"));
 

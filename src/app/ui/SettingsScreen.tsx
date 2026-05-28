@@ -7,7 +7,7 @@ import { label } from "./copy";
 import { Icon } from "./icons";
 import { ACCENT_OPTIONS } from "./theme";
 
-type SettingsSectionId =
+export type SettingsSectionId =
   | "general"
   | "audio"
   | "language"
@@ -32,13 +32,15 @@ const SETTINGS_SECTIONS: Array<{
 
 export function SettingsScreen({
   settings,
+  initialSection = "general",
   onChange
 }: {
   settings: AppSettings;
+  initialSection?: SettingsSectionId;
   onChange(settings: AppSettings): void;
 }) {
   const lang = settings.uiLanguage;
-  const [section, setSection] = useState<SettingsSectionId>("general");
+  const [section, setSection] = useState<SettingsSectionId>(initialSection);
 
   return (
     <section className="pane settings-pane" aria-label="Settings">

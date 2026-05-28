@@ -1,3 +1,4 @@
+import path from "node:path";
 import { parseProviderConfig } from "../src/features/config/providerConfig.js";
 import { createOpenAiMeetingStructureClient } from "../src/features/intelligence/openAiMeetingStructureClient.js";
 import { createOpenAiRequesters } from "../src/features/providers/openAiRequesters.js";
@@ -12,6 +13,9 @@ import type { MeetingIpcContext } from "./ipc/meetingIpc.js";
 export type MainRuntimeConfigInput = {
   env: NodeJS.ProcessEnv;
   argv: string[];
+  appPath?: string;
+  resourcesPath?: string;
+  isPackaged?: boolean;
 };
 
 export type MainRuntimeConfig = {
@@ -25,7 +29,10 @@ export type MainRuntimeConfig = {
 
 export function resolveMainRuntimeConfig({
   env,
-  argv
+  argv,
+  appPath = process.cwd(),
+  resourcesPath = process.cwd(),
+  isPackaged = false
 }: MainRuntimeConfigInput): MainRuntimeConfig {
   const demoMode =
     env.MEETMAP_DEMO_MODE === "1" || argv.includes("--meetmap-demo");
@@ -33,7 +40,14 @@ export function resolveMainRuntimeConfig({
   if (!demoMode) {
     const productionRecordingIpc: MainRuntimeConfig["recordingIpc"] = {
       audioCaptureMode: "production",
-      createAudioCaptureProvider: createWindowsAudioCaptureProvider
+      createAudioCaptureProvider: () =>
+        createWindowsAudioCaptureProvider({
+          helperPath: resolveNativeAudioHelperPath({
+            appPath,
+            resourcesPath,
+            isPackaged
+          })
+        })
     };
 
     if (shouldConfigureCloudWorkflow(env)) {
@@ -81,6 +95,23 @@ export function resolveMainRuntimeConfig({
       createAudioCaptureProvider: createDemoAudioCaptureProvider
     }
   };
+}
+
+export function resolveNativeAudioHelperPath({
+  appPath,
+  resourcesPath,
+  isPackaged
+}: {
+  appPath: string;
+  resourcesPath: string;
+  isPackaged: boolean;
+}): string {
+  const nativeRoot = isPackaged
+    ? path.join(resourcesPath, "native")
+    : path.join(appPath, "native");
+  return isPackaged
+    ? path.join(nativeRoot, "windows-audio", "meetmap-windows-audio.exe")
+    : path.join(nativeRoot, "windows-audio", "src", "MeetMap.WindowsAudio.csproj");
 }
 
 function shouldConfigureCloudWorkflow(env: NodeJS.ProcessEnv): boolean {

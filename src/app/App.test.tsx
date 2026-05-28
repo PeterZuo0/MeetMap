@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { vi } from "vitest";
 
 import { App } from "./App";
@@ -31,6 +31,8 @@ function installApi(api: Partial<MeetMapApi> = {}) {
     platform: "win32",
     createMeeting: vi.fn(async () => metadata()),
     startRecording: vi.fn(async () => metadata({ status: "recording" })),
+    pauseRecording: vi.fn(async () => metadata({ status: "recording" })),
+    resumeRecording: vi.fn(async () => metadata({ status: "recording" })),
     stopRecording: vi.fn(async () => metadata({ status: "recorded" })),
     processMeeting: vi.fn(async () =>
       metadata({
@@ -79,7 +81,8 @@ test("starts recording through the desktop API from the pre-recording screen", a
   await waitFor(() => {
     expect(api.createMeeting).toHaveBeenCalledWith({
       title: "Design review",
-      outputLanguage: "bilingual"
+      outputLanguage: "bilingual",
+      summaryStyle: "decisions_actions"
     });
   });
   expect(api.startRecording).toHaveBeenCalledWith("meeting-1", {
@@ -158,6 +161,125 @@ test("blocks start when no pre-recording audio source is selected", () => {
   expect(screen.getByText(/No audio source selected/)).toBeInTheDocument();
   expect(screen.getByRole("button", { name: /Start recording/ })).toBeDisabled();
   expect(api.startRecording).not.toHaveBeenCalled();
+});
+
+test("opens privacy settings from the pre-recording privacy link", () => {
+  render(<App />);
+
+  fireEvent.click(screen.getAllByRole("button", { name: /New recording/ })[0]);
+  fireEvent.click(screen.getByRole("button", { name: /Privacy settings/ }));
+
+  expect(screen.getByRole("heading", { name: "Privacy & storage" })).toBeInTheDocument();
+  expect(screen.getByText(/What gets uploaded/)).toBeInTheDocument();
+});
+
+test("opens audio settings from one-sided recording fix action", async () => {
+  const api = installApi();
+  render(<App />);
+
+  fireEvent.click(screen.getAllByRole("button", { name: /New recording/ })[0]);
+  fireEvent.click(screen.getByRole("switch", { name: /Microphone/ }));
+  expect(screen.getByText(/System audio only/)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: /Start recording/ }));
+  await waitFor(() => {
+    expect(api.startRecording).toHaveBeenCalledWith("meeting-1", {
+      audioSources: {
+        system: true,
+        microphone: false
+      },
+      deviceIds: {}
+    });
+  });
+  expect(await screen.findByText(/System audio only/)).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: /Fix/ }));
+
+  expect(screen.getByRole("heading", { name: "Audio devices" })).toBeInTheDocument();
+  expect(screen.getByText(/System audio capture/)).toBeInTheDocument();
+});
+
+test("selects summary style in the pre-recording setup", () => {
+  const api = installApi();
+  render(<App />);
+
+  fireEvent.click(screen.getAllByRole("button", { name: /New recording/ })[0]);
+  fireEvent.click(screen.getByRole("button", { name: "Highlights" }));
+
+  expect(screen.getByRole("button", { name: "Highlights" })).toHaveClass("soft-active");
+  expect(screen.getByRole("button", { name: "Decisions & actions" })).not.toHaveClass("soft-active");
+  fireEvent.click(screen.getByRole("button", { name: /Start recording/ }));
+  expect(api.createMeeting).toHaveBeenCalledWith({
+    title: "Untitled meeting",
+    outputLanguage: "bilingual",
+    summaryStyle: "highlights"
+  });
+});
+
+test("can return from audio settings and stop an active recording", async () => {
+  const api = installApi();
+  render(<App />);
+
+  fireEvent.click(screen.getAllByRole("button", { name: /New recording/ })[0]);
+  fireEvent.click(screen.getByRole("switch", { name: /Microphone/ }));
+  fireEvent.click(screen.getByRole("button", { name: /Start recording/ }));
+  await screen.findByText(/System audio only/);
+
+  fireEvent.click(screen.getByRole("button", { name: /Fix/ }));
+  expect(screen.getByRole("heading", { name: "Audio devices" })).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: /Recording/ }));
+  expect(await screen.findByRole("button", { name: /Stop.*process/ })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: /Stop.*process/ }));
+
+  await waitFor(() => {
+    expect(api.stopRecording).toHaveBeenCalled();
+  });
+});
+
+test("pauses and resumes recording through the desktop API", async () => {
+  const api = installApi();
+  render(<App />);
+
+  fireEvent.click(screen.getAllByRole("button", { name: /New recording/ })[0]);
+  fireEvent.click(screen.getByRole("button", { name: /Start recording/ }));
+  await screen.findByRole("heading", { name: /Roadmap review/ });
+
+  fireEvent.click(screen.getByRole("button", { name: /Pause/ }));
+  await waitFor(() => {
+    expect(api.pauseRecording).toHaveBeenCalled();
+  });
+  expect(screen.getByRole("button", { name: /Resume/ })).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: /Resume/ }));
+  await waitFor(() => {
+    expect(api.resumeRecording).toHaveBeenCalled();
+  });
+});
+
+test("updates recording audio state from live level events when available", async () => {
+  let levelCallback: Parameters<NonNullable<MeetMapApi["onAudioLevel"]>>[0] | undefined;
+  installApi({
+    onAudioLevel(callback) {
+      levelCallback = callback;
+      return () => undefined;
+    }
+  });
+  render(<App />);
+
+  fireEvent.click(screen.getAllByRole("button", { name: /New recording/ })[0]);
+  fireEvent.click(screen.getByRole("button", { name: /Start recording/ }));
+  await screen.findByRole("heading", { name: /Roadmap review/ });
+
+  expect(screen.getByText(/No audio detected/)).toBeInTheDocument();
+  act(() => {
+    levelCallback?.({
+      track: "system",
+      level: 0.4,
+      occurredAt: "2026-05-28T00:00:01.000Z"
+    });
+  });
+
+  expect(await screen.findByText(/System audio only/)).toBeInTheDocument();
 });
 
 test("stops, processes, and opens exports through the desktop API", async () => {

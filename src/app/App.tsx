@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
-import type { MeetingMetadata, ProcessingStep } from "../features/meetings/meetingTypes";
+import type { MeetingMetadata, ProcessingStep, SummaryStyle } from "../features/meetings/meetingTypes";
 import type { LanguageOptionValue } from "../features/settings/languageOptions";
 import type {
   AppSettings,
   RecordingAudioDevice,
+  RecordingAudioLevel,
   RecordingAudioSources,
   WorkflowPhase
 } from "./meetMapApi";
@@ -13,7 +14,7 @@ import { MeetMapShell } from "./ui/MeetMapShell";
 import { PreRecordingScreen } from "./ui/PreRecordingScreen";
 import { ProcessingScreen } from "./ui/ProcessingScreen";
 import { RecordingScreen } from "./ui/RecordingScreen";
-import { SettingsScreen } from "./ui/SettingsScreen";
+import { SettingsScreen, type SettingsSectionId } from "./ui/SettingsScreen";
 import { DEFAULT_APP_SETTINGS } from "./ui/theme";
 
 export function App() {
@@ -25,6 +26,7 @@ export function App() {
   const [draftOutputLanguage, setDraftOutputLanguage] = useState<LanguageOptionValue>(
     settings.defaultOutputLanguage
   );
+  const [draftSummaryStyle, setDraftSummaryStyle] = useState<SummaryStyle>("decisions_actions");
   const [draftAudioSources, setDraftAudioSources] = useState<RecordingAudioSources>({
     system: true,
     microphone: true
@@ -35,9 +37,13 @@ export function App() {
     system: true,
     microphone: true
   });
+  const [liveAudioLevels, setLiveAudioLevels] = useState<Partial<Record<"system" | "microphone", RecordingAudioLevel>>>({});
   const [isStarting, setIsStarting] = useState(false);
   const [isStopping, setIsStopping] = useState(false);
+  const [isRecordingPaused, setIsRecordingPaused] = useState(false);
+  const [isPauseChanging, setIsPauseChanging] = useState(false);
   const [activeStep, setActiveStep] = useState<ProcessingStep>("activity_detection");
+  const [settingsInitialSection, setSettingsInitialSection] = useState<SettingsSectionId>("general");
   const [error, setError] = useState<string | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
 
@@ -72,6 +78,19 @@ export function App() {
     };
   }, [api, phase]);
 
+  useEffect(() => {
+    if (!api?.onAudioLevel) {
+      return;
+    }
+
+    return api.onAudioLevel((update) => {
+      setLiveAudioLevels((current) => ({
+        ...current,
+        [update.track]: update
+      }));
+    });
+  }, [api]);
+
   const crumbs = useMemo(() => {
     switch (phase) {
       case "library":
@@ -89,6 +108,11 @@ export function App() {
     }
   }, [phase]);
 
+  const recordingActive = meeting?.status === "recording";
+  const displayedAudioSources = api?.onAudioLevel
+    ? deriveDetectedAudioSources(activeAudioSources, liveAudioLevels)
+    : activeAudioSources;
+
   function navigate(nextPhase: WorkflowPhase) {
     setError(null);
     setExportError(null);
@@ -97,6 +121,16 @@ export function App() {
       setDraftOutputLanguage(settings.defaultOutputLanguage);
       setDraftAudioSources({ system: true, microphone: true });
     }
+    if (nextPhase === "settings") {
+      setSettingsInitialSection("general");
+    }
+  }
+
+  function openSettings(section: SettingsSectionId = "general") {
+    setSettingsInitialSection(section);
+    setError(null);
+    setExportError(null);
+    setPhase("settings");
   }
 
   async function startRecording() {
@@ -112,13 +146,16 @@ export function App() {
     try {
       const createdMeeting = await api.createMeeting({
         title,
-        outputLanguage: draftOutputLanguage
+        outputLanguage: draftOutputLanguage,
+        summaryStyle: draftSummaryStyle
       });
       const recordingMeeting = await api.startRecording(createdMeeting.id, {
         audioSources: draftAudioSources,
         deviceIds: selectedAudioDeviceIds
       });
       setActiveAudioSources(draftAudioSources);
+      setLiveAudioLevels({});
+      setIsRecordingPaused(false);
       setMeeting(recordingMeeting);
       setPhase("recording");
     } catch (caughtError) {
@@ -139,6 +176,7 @@ export function App() {
     try {
       const recordedMeeting = await api.stopRecording();
       setMeeting(recordedMeeting);
+      setIsRecordingPaused(false);
       setActiveStep("activity_detection");
       setPhase("processing");
       void processCurrentMeeting(recordedMeeting.id);
@@ -181,6 +219,30 @@ export function App() {
     }
   }
 
+  async function setRecordingPaused(nextPaused: boolean) {
+    if (!api) {
+      setError("MeetMap desktop API is unavailable");
+      return;
+    }
+
+    const pauseAction = nextPaused ? api.pauseRecording : api.resumeRecording;
+    if (!pauseAction) {
+      setError("Recording pause is not available in this runtime");
+      return;
+    }
+
+    setIsPauseChanging(true);
+    setError(null);
+    try {
+      await pauseAction();
+      setIsRecordingPaused(nextPaused);
+    } catch (caughtError) {
+      setError(formatError(caughtError));
+    } finally {
+      setIsPauseChanging(false);
+    }
+  }
+
   async function openExport(kind: "word" | "html") {
     if (!api || !meeting) {
       setExportError("Export is not available yet");
@@ -209,7 +271,7 @@ export function App() {
         current={phase}
         lang={settings.uiLanguage}
         onNav={(target) => navigate(target)}
-        recording={phase === "recording"}
+        recording={recordingActive}
       >
         {phase === "library" ? (
           <LibraryScreen
@@ -226,16 +288,19 @@ export function App() {
             lang={settings.uiLanguage}
             onCancel={() => navigate("library")}
             onOutputLanguageChange={setDraftOutputLanguage}
+            onSummaryStyleChange={setDraftSummaryStyle}
             onAudioSourcesChange={setDraftAudioSources}
             onDeviceChange={(track, deviceId) =>
               setSelectedAudioDeviceIds((current) => ({ ...current, [track]: deviceId }))
             }
+            onOpenPrivacySettings={() => openSettings("privacy")}
             onStart={() => void startRecording()}
             onTitleChange={setDraftTitle}
             audioSources={draftAudioSources}
             devices={audioDevices}
             selectedDeviceIds={selectedAudioDeviceIds}
             outputLanguage={draftOutputLanguage}
+            summaryStyle={draftSummaryStyle}
             title={draftTitle}
           />
         ) : null}
@@ -243,9 +308,13 @@ export function App() {
           <RecordingScreen
             error={error}
             isStopping={isStopping}
-            audioSources={activeAudioSources}
+            isPaused={isRecordingPaused}
+            isPauseChanging={isPauseChanging}
+            audioSources={displayedAudioSources}
             lang={settings.uiLanguage}
             meeting={meeting}
+            onOpenAudioSettings={() => openSettings("audio")}
+            onPauseChange={(paused) => void setRecordingPaused(paused)}
             onStop={() => void stopRecording()}
           />
         ) : null}
@@ -272,7 +341,12 @@ export function App() {
           />
         ) : null}
         {phase === "settings" ? (
-          <SettingsScreen onChange={updateSettings} settings={settings} />
+          <SettingsScreen
+            initialSection={settingsInitialSection}
+            key={settingsInitialSection}
+            onChange={updateSettings}
+            settings={settings}
+          />
         ) : null}
       </MeetMapShell>
     </div>
@@ -281,4 +355,14 @@ export function App() {
 
 function formatError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function deriveDetectedAudioSources(
+  activeAudioSources: RecordingAudioSources,
+  levels: Partial<Record<"system" | "microphone", RecordingAudioLevel>>
+): RecordingAudioSources {
+  return {
+    system: Boolean(activeAudioSources.system && levels.system && levels.system.level > 0.02),
+    microphone: Boolean(activeAudioSources.microphone && levels.microphone && levels.microphone.level > 0.02)
+  };
 }

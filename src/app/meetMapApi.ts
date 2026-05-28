@@ -1,4 +1,4 @@
-import type { AudioTrackId, MeetingMetadata } from "../features/meetings/meetingTypes";
+import type { AudioTrackId, MeetingMetadata, SummaryStyle } from "../features/meetings/meetingTypes";
 import type { LanguageOptionValue } from "../features/settings/languageOptions";
 
 export type RecordingAudioSources = {
@@ -12,6 +12,12 @@ export type RecordingAudioDevice = {
   track: AudioTrackId;
 };
 
+export type RecordingAudioLevel = {
+  track: AudioTrackId;
+  level: number;
+  occurredAt: string;
+};
+
 export type RecordingStartOptions = {
   audioSources: RecordingAudioSources;
   deviceIds?: Partial<Record<AudioTrackId, string>>;
@@ -19,13 +25,17 @@ export type RecordingStartOptions = {
 
 export type MeetMapApi = {
   platform: string;
-  createMeeting(input: {
-    title: string;
-    outputLanguage: LanguageOptionValue;
-  }): Promise<MeetingMetadata>;
+	  createMeeting(input: {
+	    title: string;
+	    outputLanguage: LanguageOptionValue;
+	    summaryStyle?: SummaryStyle;
+	  }): Promise<MeetingMetadata>;
   startRecording(meetingId: string, options?: RecordingStartOptions): Promise<MeetingMetadata>;
+  pauseRecording?(): Promise<MeetingMetadata>;
+  resumeRecording?(): Promise<MeetingMetadata>;
   stopRecording(): Promise<MeetingMetadata>;
   listAudioDevices?(): Promise<RecordingAudioDevice[]>;
+  onAudioLevel?(callback: (update: RecordingAudioLevel) => void): () => void;
   processMeeting(meetingId: string): Promise<MeetingMetadata>;
   openExport(input: { meetingId: string; kind: "word" | "html" }): Promise<void>;
 };
