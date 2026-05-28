@@ -52,10 +52,31 @@ export type UiLanguage = "en" | "zh" | "bi";
 export type ThemeMode = "light" | "dark";
 
 export type AppSettings = {
+  autoDeleteCloudCopies: boolean;
+  autoGain: boolean;
   theme: ThemeMode;
   accent: string;
+  cantonese: boolean;
+  englishGB: boolean;
+  englishUS: boolean;
+  exportMapView: "tree" | "radial" | "timeline";
   uiLanguage: UiLanguage;
   defaultOutputLanguage: LanguageOptionValue;
+  includeTimestamps: boolean;
+  includeTranscriptAppendix: boolean;
+  keepIntermediateArtifacts: boolean;
+  mandarin: boolean;
+  minimizeToTray: boolean;
+  mixedCodeSwitching: boolean;
+  noiseSuppression: boolean;
+  openAfterExport: boolean;
+  openAtStartup: boolean;
+  preserveTranscriptLanguage: boolean;
+  speakerDiarization: boolean;
+  standaloneExport: boolean;
+  uploadRecordedAudio: boolean;
+  uploadSeparateTracks: boolean;
+  useOutputLanguage: boolean;
 };
 
 declare global {

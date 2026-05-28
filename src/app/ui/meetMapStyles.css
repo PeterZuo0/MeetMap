@@ -2043,19 +2043,21 @@ button {
 }
 
 .toggle {
-  width: 32px;
-  height: 20px;
+  width: 38px;
+  min-height: 24px;
+  border: 0;
   border-radius: 999px;
   background: var(--border-strong);
   display: inline-flex;
   align-items: center;
   padding: 2px;
   transition: background 140ms ease;
+  cursor: pointer;
 }
 
 .toggle span {
-  width: 16px;
-  height: 16px;
+  width: 20px;
+  height: 20px;
   border-radius: 50%;
   background: var(--surface);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
@@ -2067,7 +2069,7 @@ button {
 }
 
 .toggle.checked span {
-  transform: translateX(12px);
+  transform: translateX(14px);
 }
 
 .segmented-control {
