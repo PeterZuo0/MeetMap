@@ -2,15 +2,19 @@ import type { CSSProperties } from "react";
 
 type IconName =
   | "audio"
+  | "calendar"
   | "check"
   | "chevronRight"
   | "clock"
   | "download"
   | "file"
+  | "filter"
   | "folder"
+  | "grid"
   | "list"
   | "mic"
   | "monitor"
+  | "more"
   | "pause"
   | "pin"
   | "play"
@@ -59,6 +63,15 @@ export function Icon({
           <path d="M20 10v4" />
         </svg>
       );
+    case "calendar":
+      return (
+        <svg {...common}>
+          <rect x="4" y="5" width="16" height="15" rx="2" />
+          <path d="M8 3v4" />
+          <path d="M16 3v4" />
+          <path d="M4 10h16" />
+        </svg>
+      );
     case "check":
       return (
         <svg {...common}>
@@ -93,10 +106,25 @@ export function Icon({
           <path d="M14 3v5h5" />
         </svg>
       );
+    case "filter":
+      return (
+        <svg {...common}>
+          <path d="M4 5h16l-6 7v5l-4 2v-7z" />
+        </svg>
+      );
     case "folder":
       return (
         <svg {...common}>
           <path d="M3 6h7l2 2h9v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+        </svg>
+      );
+    case "grid":
+      return (
+        <svg {...common}>
+          <rect x="4" y="4" width="6" height="6" rx="1" />
+          <rect x="14" y="4" width="6" height="6" rx="1" />
+          <rect x="4" y="14" width="6" height="6" rx="1" />
+          <rect x="14" y="14" width="6" height="6" rx="1" />
         </svg>
       );
     case "list":
@@ -124,6 +152,14 @@ export function Icon({
           <rect x="3" y="4" width="18" height="12" rx="2" />
           <path d="M8 20h8" />
           <path d="M12 16v4" />
+        </svg>
+      );
+    case "more":
+      return (
+        <svg {...common}>
+          <path d="M5 12h.01" />
+          <path d="M12 12h.01" />
+          <path d="M19 12h.01" />
         </svg>
       );
     case "pause":
