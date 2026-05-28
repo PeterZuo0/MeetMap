@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { vi } from "vitest";
 
 import { App } from "./App";
@@ -282,7 +282,7 @@ test("updates recording audio state from live level events when available", asyn
   expect(await screen.findByText(/System audio only/)).toBeInTheDocument();
 });
 
-test("stops, processes, and opens exports through the desktop API", async () => {
+test("stops, processes, and opens Word exports through the export dialog", async () => {
   const api = installApi();
   render(<App />);
 
@@ -303,8 +303,33 @@ test("stops, processes, and opens exports through the desktop API", async () => 
   });
   expect(await screen.findByRole("heading", { name: "Meeting detail" })).toBeInTheDocument();
 
-  fireEvent.click(screen.getByRole("button", { name: /Open Word summary/ }));
+  fireEvent.click(screen.getByRole("button", { name: /^Export/ }));
+  const dialog = screen.getByRole("dialog", { name: /Export meeting/ });
+  expect(within(dialog).getByRole("radio", { name: /Word document/ })).toHaveAttribute("aria-checked", "true");
+  expect(within(dialog).getByLabelText(/Full transcript/)).toBeChecked();
+  expect(within(dialog).getByLabelText(/Embedded audio/)).toBeDisabled();
+
+  fireEvent.click(within(dialog).getByRole("button", { name: /^Export/ }));
   expect(api.openExport).toHaveBeenCalledWith({ meetingId: "meeting-1", kind: "word" });
+});
+
+test("opens HTML exports from the export dialog format card", async () => {
+  const api = installApi();
+  render(<App />);
+
+  fireEvent.click(screen.getAllByRole("button", { name: /New recording/ })[0]);
+  fireEvent.click(screen.getByRole("button", { name: /Start recording/ }));
+  await screen.findByRole("heading", { name: /Roadmap review/ });
+  fireEvent.click(screen.getByRole("button", { name: /Stop.*process/ }));
+  expect(await screen.findByRole("heading", { name: "Meeting detail" })).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: /^Export/ }));
+  const dialog = screen.getByRole("dialog", { name: /Export meeting/ });
+  fireEvent.click(within(dialog).getByRole("radio", { name: /Structure map/ }));
+  expect(within(dialog).getByLabelText(/Embedded audio/)).not.toBeDisabled();
+
+  fireEvent.click(within(dialog).getByRole("button", { name: /^Export/ }));
+  expect(api.openExport).toHaveBeenCalledWith({ meetingId: "meeting-1", kind: "html" });
 });
 
 test("shows no-audio result without export actions", async () => {
@@ -324,7 +349,7 @@ test("shows no-audio result without export actions", async () => {
   fireEvent.click(screen.getByRole("button", { name: /Stop.*process/ }));
 
   expect(await screen.findByText(/No speech was detected/)).toBeInTheDocument();
-  expect(screen.queryByRole("button", { name: /Open Word summary/ })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /^Export/ })).not.toBeInTheDocument();
 });
 
 test("moves prototype tweaks into Settings General", () => {

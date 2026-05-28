@@ -387,6 +387,13 @@ button {
   font-size: 11px;
 }
 
+.field-label {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 650;
+  margin: 0 0 8px;
+}
+
 .form-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 320px;
@@ -1361,6 +1368,207 @@ button {
   max-width: 760px;
 }
 
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(2px);
+}
+
+.export-dialog {
+  width: min(560px, 100%);
+  max-height: min(720px, calc(100vh - 40px));
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: 0 30px 80px -20px rgba(0, 0, 0, 0.5);
+}
+
+.export-dialog-head,
+.export-dialog-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 20px;
+}
+
+.export-dialog-head {
+  border-bottom: 1px solid var(--border);
+  color: var(--accent-text);
+}
+
+.export-dialog-head .h2 {
+  flex: 1;
+  margin: 0;
+  color: var(--text);
+}
+
+.icon-button {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.icon-button:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.export-dialog-body {
+  overflow: auto;
+  padding: 18px 20px;
+}
+
+.export-format-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.export-format-card {
+  position: relative;
+  min-height: 108px;
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  padding: 12px;
+  text-align: left;
+}
+
+.export-format-card.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.export-format-icon {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--accent-text);
+}
+
+.export-format-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: 11.5px;
+  line-height: 1.35;
+}
+
+.export-format-copy strong {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.mono {
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+
+.export-format-check {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 16px;
+  height: 16px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--accent);
+  color: white;
+}
+
+.export-option-list {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 18px;
+}
+
+.export-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 38px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  font-size: 13px;
+}
+
+.export-option:last-child {
+  border-bottom: 0;
+}
+
+.export-option.disabled {
+  color: var(--text-faint);
+}
+
+.export-option input {
+  accent-color: var(--accent);
+}
+
+.segmented.muted {
+  width: fit-content;
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.segmented.muted span {
+  min-height: 26px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 10px;
+  border-radius: 6px;
+}
+
+.segmented.muted .active {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+
+.export-dialog-foot {
+  border-top: 1px solid var(--border);
+  background: var(--surface-2);
+}
+
+.export-dialog-foot .sub {
+  flex: 1;
+}
+
 @media (max-width: 900px) {
   .meetmap-root {
     padding: 0;
@@ -1397,6 +1605,7 @@ button {
   .stats-grid,
   .form-grid,
   .two-col,
+  .export-format-grid,
   .settings-grid,
   .settings-row {
     grid-template-columns: 1fr;

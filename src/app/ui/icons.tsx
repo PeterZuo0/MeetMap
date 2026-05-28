@@ -2,6 +2,7 @@ import type { CSSProperties } from "react";
 
 type IconName =
   | "audio"
+  | "check"
   | "chevronRight"
   | "clock"
   | "download"
@@ -19,7 +20,8 @@ type IconName =
   | "settings"
   | "spark"
   | "stop"
-  | "users";
+  | "users"
+  | "x";
 
 export function Icon({
   name,
@@ -54,6 +56,12 @@ export function Icon({
           <path d="M12 3v18" />
           <path d="M16 7v10" />
           <path d="M20 10v4" />
+        </svg>
+      );
+    case "check":
+      return (
+        <svg {...common}>
+          <path d="m5 12 4 4 10-10" />
         </svg>
       );
     case "chevronRight":
@@ -189,6 +197,13 @@ export function Icon({
           <circle cx="12" cy="9" r="4" />
           <path d="M22 20a3 3 0 0 0-4-2.8" />
           <path d="M17 6.2a3 3 0 0 1 0 5.6" />
+        </svg>
+      );
+    case "x":
+      return (
+        <svg {...common}>
+          <path d="M6 6l12 12" />
+          <path d="M18 6 6 18" />
         </svg>
       );
   }
