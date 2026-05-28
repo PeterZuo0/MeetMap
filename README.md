@@ -115,6 +115,37 @@ Expected result when both sources are available:
 - `meetings/manual-smoke/audio/system.wav` exists and contains captured system output.
 - `meetings/manual-smoke/audio/microphone.wav` exists and contains captured microphone input.
 
+## Production Post-Meeting Smoke Test
+
+Use only non-sensitive test audio. This command uploads the provided WAV files to the configured cloud provider and writes generated artifacts under the requested data directory.
+
+Set an OpenAI API key in the shell or in `.env`, then run:
+
+```powershell
+pnpm smoke:production -- `
+  --meeting-id manual-smoke `
+  --title "Manual smoke test" `
+  --data-dir "$PWD/meetings" `
+  --system-audio "$PWD/meetings/manual-smoke-input/system.wav" `
+  --microphone-audio "$PWD/meetings/manual-smoke-input/microphone.wav" `
+  --output-language bilingual `
+  --allow-cloud-upload
+```
+
+The `--allow-cloud-upload` flag is required. Without it, the smoke runner refuses to process audio. The runner also rejects missing inputs, invalid RIFF/WAVE files, and runs with no audio source.
+
+Expected artifacts:
+
+- `meetings/manual-smoke/metadata.json`
+- `meetings/manual-smoke/audio/system.wav` when system audio is provided
+- `meetings/manual-smoke/audio/microphone.wav` when microphone audio is provided
+- `meetings/manual-smoke/transcript.json`
+- `meetings/manual-smoke/structure.json`
+- `meetings/manual-smoke/exports/meeting-summary.docx`
+- `meetings/manual-smoke/exports/meeting-map.html`
+
+Failures preserve retryable local state where possible. If transcription fails, copied audio and metadata remain. If structure extraction fails, `transcript.json` remains. If export generation fails, `structure.json` remains. Do not commit `.env`, `meetings/`, raw audio, transcripts, summaries, meeting maps, or logs.
+
 ## Privacy
 
 Treat meeting audio, transcripts, summaries, maps, and logs as sensitive data.
