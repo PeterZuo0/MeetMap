@@ -14,6 +14,20 @@ test("uses production providers unless demo mode is explicitly enabled", () => {
   });
 });
 
+test("configures production cloud workflow services when OpenAI credentials are present", () => {
+  const config = resolveMainRuntimeConfig({
+    env: {
+      OPENAI_API_KEY: "test-key"
+    },
+    argv: ["electron", "."]
+  });
+
+  expect(config.demoMode).toBe(false);
+  expect(config.meetingIpc.workflowMode).toBe("production");
+  expect(config.meetingIpc.workflowServices).toBeDefined();
+  expect(config.recordingIpc).toEqual({});
+});
+
 test("enables demo providers with an explicit environment flag", () => {
   const config = resolveMainRuntimeConfig({
     env: {

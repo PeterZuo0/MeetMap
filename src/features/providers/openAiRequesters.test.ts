@@ -1,0 +1,109 @@
+import { describe, expect, test } from "vitest";
+
+import {
+  createOpenAiAudioTranscriptionRequester,
+  createOpenAiMeetingStructureRequester
+} from "./openAiRequesters";
+
+describe("createOpenAiAudioTranscriptionRequester", () => {
+  test("posts audio files to the OpenAI transcription endpoint", async () => {
+    const calls: unknown[] = [];
+    const requester = createOpenAiAudioTranscriptionRequester({
+      async readFile(filePath) {
+        expect(filePath).toBe("C:/meetings/1/audio/system.wav");
+        return new Uint8Array([1, 2, 3]);
+      },
+      async fetch(input, init) {
+        calls.push([input, init]);
+        return {
+          ok: true,
+          status: 200,
+          async json() {
+            return {
+              text: "hello",
+              language: "en",
+              segments: []
+            };
+          }
+        };
+      }
+    });
+
+    await expect(
+      requester({
+        apiKey: "test-key",
+        model: "gpt-4o-mini-transcribe",
+        filePath: "C:/meetings/1/audio/system.wav",
+        responseFormat: "verbose_json",
+        timestampGranularities: ["segment"]
+      })
+    ).resolves.toEqual({
+      text: "hello",
+      language: "en",
+      segments: []
+    });
+
+    const [url, init] = calls[0] as [
+      string,
+      { headers: Record<string, string>; body: FormData }
+    ];
+    expect(url).toBe("https://api.openai.com/v1/audio/transcriptions");
+    expect(init.headers.Authorization).toBe("Bearer test-key");
+    expect(init.body.get("model")).toBe("gpt-4o-mini-transcribe");
+    expect(init.body.get("response_format")).toBe("verbose_json");
+    expect(init.body.get("timestamp_granularities[]")).toBe("segment");
+    expect(init.body.get("file")).toBeInstanceOf(File);
+  });
+});
+
+describe("createOpenAiMeetingStructureRequester", () => {
+  test("posts structured-output requests to the OpenAI Responses endpoint", async () => {
+    const calls: unknown[] = [];
+    const requester = createOpenAiMeetingStructureRequester({
+      async fetch(input, init) {
+        calls.push([input, init]);
+        return {
+          ok: true,
+          status: 200,
+          async json() {
+            return {
+              output_text: "{\"summary\":\"ok\"}"
+            };
+          }
+        };
+      }
+    });
+
+    await expect(
+      requester({
+        apiKey: "test-key",
+        model: "gpt-4.1-mini",
+        instructions: "Extract in bilingual.",
+        input: "{\"transcript\":[]}",
+        text: {
+          format: {
+            type: "json_schema",
+            name: "meeting_structure",
+            strict: true,
+            schema: { type: "object" }
+          }
+        }
+      })
+    ).resolves.toEqual({
+      outputText: "{\"summary\":\"ok\"}"
+    });
+
+    const [url, init] = calls[0] as [
+      string,
+      { headers: Record<string, string>; body: string }
+    ];
+    expect(url).toBe("https://api.openai.com/v1/responses");
+    expect(init.headers.Authorization).toBe("Bearer test-key");
+    expect(init.headers["Content-Type"]).toBe("application/json");
+    expect(JSON.parse(init.body)).toMatchObject({
+      model: "gpt-4.1-mini",
+      instructions: "Extract in bilingual.",
+      input: "{\"transcript\":[]}"
+    });
+  });
+});
