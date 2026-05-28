@@ -25,7 +25,7 @@ describe("createOpenAiTranscriptionClient", () => {
     };
     const client = createOpenAiTranscriptionClient({
       apiKey: "test-key",
-      model: "gpt-4o-mini-transcribe",
+      model: "whisper-1",
       requestTranscription: requester
     });
 
@@ -42,7 +42,7 @@ describe("createOpenAiTranscriptionClient", () => {
       [
         {
           apiKey: "test-key",
-          model: "gpt-4o-mini-transcribe",
+          model: "whisper-1",
           filePath: "C:/meetings/1/audio/system.wav",
           responseFormat: "verbose_json",
           timestampGranularities: ["segment"]
@@ -60,6 +60,35 @@ describe("createOpenAiTranscriptionClient", () => {
         confidence: 0.91
       }
     ]);
+  });
+
+  test("uses json response format for gpt-4o transcribe models", async () => {
+    const calls: Parameters<OpenAiAudioTranscriptionRequester>[] = [];
+    const client = createOpenAiTranscriptionClient({
+      apiKey: "test-key",
+      model: "gpt-4o-mini-transcribe",
+      async requestTranscription(request) {
+        calls.push([request]);
+        return {
+          text: "MeetMap smoke test.",
+          language: "en"
+        };
+      }
+    });
+
+    await client.transcribeChunk({
+      id: "chunk-1",
+      index: 0,
+      trackId: "microphone",
+      filePath: "mic.wav",
+      startOffsetMs: 0,
+      durationMs: 2000
+    });
+
+    expect(calls[0][0]).toMatchObject({
+      responseFormat: "json"
+    });
+    expect(calls[0][0].timestampGranularities).toBeUndefined();
   });
 
   test("falls back to one segment when provider does not return segment timings", async () => {

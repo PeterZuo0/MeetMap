@@ -18,8 +18,8 @@ export type OpenAiAudioTranscriptionRequest = {
   apiKey: string;
   model: string;
   filePath: string;
-  responseFormat: "verbose_json";
-  timestampGranularities: ["segment"];
+  responseFormat: "json" | "verbose_json";
+  timestampGranularities?: ["segment"];
 };
 
 export type OpenAiAudioTranscriptionResponse = {
@@ -46,12 +46,12 @@ export function createOpenAiTranscriptionClient({
   return {
     async transcribeChunk(request) {
       try {
+        const responseOptions = createTranscriptionResponseOptions(model);
         const response = await requestTranscription({
           apiKey,
           model,
           filePath: request.filePath,
-          responseFormat: "verbose_json",
-          timestampGranularities: ["segment"]
+          ...responseOptions
         });
 
         return mapOpenAiResponseToTranscriptSegments(request, response);
@@ -59,6 +59,24 @@ export function createOpenAiTranscriptionClient({
         throw mapOpenAiTranscriptionError(error);
       }
     }
+  };
+}
+
+function createTranscriptionResponseOptions(
+  model: string
+): Pick<
+  OpenAiAudioTranscriptionRequest,
+  "responseFormat" | "timestampGranularities"
+> {
+  if (/^gpt-4o(?:-.+)?-transcribe/i.test(model)) {
+    return {
+      responseFormat: "json"
+    };
+  }
+
+  return {
+    responseFormat: "verbose_json",
+    timestampGranularities: ["segment"]
   };
 }
 

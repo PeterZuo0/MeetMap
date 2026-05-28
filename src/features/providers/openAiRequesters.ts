@@ -68,7 +68,7 @@ export function createOpenAiAudioTranscriptionRequester(
     );
     formData.set("model", request.model);
     formData.set("response_format", request.responseFormat);
-    request.timestampGranularities.forEach((granularity) => {
+    request.timestampGranularities?.forEach((granularity) => {
       formData.append("timestamp_granularities[]", granularity);
     });
 
