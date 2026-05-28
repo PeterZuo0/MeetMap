@@ -68,6 +68,42 @@ test("renders the migrated library shell by default", () => {
   expect(screen.queryByText(/Tweaks/)).not.toBeInTheDocument();
 });
 
+test("supports template library filters and view switching", () => {
+  render(<App />);
+
+  expect(screen.getByText(/TOTAL MEETINGS/i)).toBeInTheDocument();
+  expect(screen.getByText(/HOURS CAPTURED/i)).toBeInTheDocument();
+  expect(screen.getByText(/STORAGE USED/i)).toBeInTheDocument();
+  expect(screen.getByRole("columnheader", { name: /Meeting/ })).toBeInTheDocument();
+  expect(screen.getByRole("columnheader", { name: /Folder/ })).toBeInTheDocument();
+  expect(screen.getByRole("columnheader", { name: /Lang/ })).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: /^Processing/ }));
+
+  expect(screen.getByText(/Vendor sync/)).toBeInTheDocument();
+  expect(screen.queryByText(/Acme Corp/)).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: /^Today/ }));
+  expect(screen.getByText(/Q3 roadmap review/)).toBeInTheDocument();
+  expect(screen.getByText(/Acme Corp/)).toBeInTheDocument();
+  expect(screen.queryByText(/Vendor sync/)).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: /Filter/ }));
+  expect(screen.getByText(/Filter: Client calls/)).toBeInTheDocument();
+  expect(screen.getByText(/Acme Corp/)).toBeInTheDocument();
+  expect(screen.queryByText(/Q3 roadmap review/)).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: /Any date/ }));
+  expect(screen.getByText(/Date: This week/)).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: /Grid view/ }));
+  expect(screen.getByRole("list", { name: /Meeting grid/ })).toBeInTheDocument();
+  expect(screen.queryByRole("columnheader", { name: /Meeting/ })).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: /List view/ }));
+  expect(screen.getByRole("columnheader", { name: /Meeting/ })).toBeInTheDocument();
+});
+
 test("starts recording through the desktop API from the pre-recording screen", async () => {
   const api = installApi();
   render(<App />);
