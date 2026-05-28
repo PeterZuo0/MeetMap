@@ -170,6 +170,54 @@ test("creates standalone HTML with embedded graph data", () => {
   expect(html).toContain("Product planning");
 });
 
+test("creates HTML graph data with disabled export nodes removed", () => {
+  const html = createHtmlMeetingMap(meetingStructure(), {
+    actions: false,
+    audio: false,
+    decisions: false,
+    map: true,
+    timestamps: false,
+    transcript: false
+  });
+  const graphJson = html.match(
+    /<script id="meetmap-graph-data" type="application\/json">(.+)<\/script>/
+  )?.[1];
+
+  expect(graphJson).toBeDefined();
+  const graph = JSON.parse(graphJson ?? "{}") as ReturnType<typeof buildMeetingGraph>;
+  expect(graph.nodes.map((node) => node.id)).not.toContain("decision-1");
+  expect(graph.nodes.map((node) => node.id)).not.toContain("action-1");
+  expect(graph.nodes.find((node) => node.id === "meeting-1")?.metadata).toEqual({
+    sourceLanguage: "en",
+    outputLanguage: "en"
+  });
+  expect(graph.edges.some((edge) => edge.fromId === "decision-1" || edge.toId === "action-1")).toBe(false);
+});
+
+test("keeps selected non-map nodes valid when the structure map is disabled", () => {
+  const html = createHtmlMeetingMap(meetingStructure(), {
+    actions: true,
+    audio: false,
+    decisions: true,
+    map: false,
+    timestamps: true,
+    transcript: false
+  });
+  const graphJson = html.match(
+    /<script id="meetmap-graph-data" type="application\/json">(.+)<\/script>/
+  )?.[1];
+  const graph = JSON.parse(graphJson ?? "{}") as ReturnType<typeof buildMeetingGraph>;
+
+  expect(graph.nodes.map((node) => node.id)).not.toContain("topic-1");
+  expect(graph.nodes.map((node) => node.id)).not.toContain("topic-2");
+  expect(graph.nodes.find((node) => node.id === "decision-1")).toEqual(
+    expect.not.objectContaining({ parentId: expect.anything() })
+  );
+  expect(graph.nodes.find((node) => node.id === "action-1")).toEqual(
+    expect.not.objectContaining({ parentId: expect.anything() })
+  );
+});
+
 test("fails clearly when a structure child references a missing topic", () => {
   const structure = meetingStructure();
   structure.decisions[0] = {

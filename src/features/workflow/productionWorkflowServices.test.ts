@@ -3,6 +3,7 @@ import { describe, expect, test } from "vitest";
 import type { MeetingStructure } from "../intelligence/meetingStructure";
 import type { MeetingStructureClient } from "../intelligence/meetingStructureClient";
 import type { MeetingMetadata } from "../meetings/meetingTypes";
+import type { ProcessingPreferences } from "../settings/processingPreferences";
 import type { TranscriptionClient } from "../transcription/transcriptionClient";
 import type { TranscriptSegment } from "../transcription/transcriptionTypes";
 import { createProductionWorkflowServices } from "./productionWorkflowServices";
@@ -53,6 +54,25 @@ function segment(trackId: "system" | "microphone"): TranscriptSegment {
     text: "We kept export workflow in scope.",
     language: "en",
     confidence: 0.98
+  };
+}
+
+function processingPreferences(overrides: Partial<ProcessingPreferences> = {}): ProcessingPreferences {
+  return {
+    autoDeleteCloudCopies: true,
+    preserveTranscriptLanguage: true,
+    recognitionLanguages: {
+      cantonese: false,
+      englishGB: false,
+      englishUS: true,
+      mandarin: true,
+      mixedCodeSwitching: true
+    },
+    speakerDiarization: true,
+    uploadRecordedAudio: true,
+    uploadSeparateTracks: true,
+    useOutputLanguage: true,
+    ...overrides
   };
 }
 
@@ -140,6 +160,79 @@ describe("createProductionWorkflowServices", () => {
     ]);
   });
 
+  test("blocks production transcription when cloud audio upload is disabled", async () => {
+    const calls: Parameters<TranscriptionClient["transcribeChunk"]>[] = [];
+    const services = createProductionWorkflowServices({
+      transcriptionClient: {
+        async transcribeChunk(request) {
+          calls.push([request]);
+          return [segment(request.trackId)];
+        }
+      },
+      structureClient: { async extractStructure() { return validStructure(); } }
+    });
+
+    await expect(
+      services.transcribe(["system"], metadata(), processingPreferences({ uploadRecordedAudio: false }))
+    ).rejects.toThrow("Cloud audio upload is disabled");
+    expect(calls).toEqual([]);
+  });
+
+  test("passes transcription preferences to the provider request", async () => {
+    const calls: Parameters<TranscriptionClient["transcribeChunk"]>[] = [];
+    const preferences = processingPreferences({
+      speakerDiarization: false,
+      uploadSeparateTracks: false,
+      recognitionLanguages: {
+        cantonese: true,
+        englishGB: true,
+        englishUS: false,
+        mandarin: true,
+        mixedCodeSwitching: false
+      }
+    });
+    const services = createProductionWorkflowServices({
+      transcriptionClient: {
+        async transcribeChunk(request) {
+          calls.push([request]);
+          return [segment(request.trackId)];
+        }
+      },
+      structureClient: { async extractStructure() { return validStructure(); } }
+    });
+
+    await services.transcribe(["system"], metadata(), preferences);
+
+    expect(calls[0]?.[0]).toMatchObject({
+      autoDeleteCloudCopies: true,
+      recognitionLanguages: preferences.recognitionLanguages,
+      speakerDiarization: false,
+      uploadSeparateTracks: false
+    });
+  });
+
+  test("does not upload both tracks separately when separate track upload is disabled", async () => {
+    const calls: Parameters<TranscriptionClient["transcribeChunk"]>[] = [];
+    const services = createProductionWorkflowServices({
+      transcriptionClient: {
+        async transcribeChunk(request) {
+          calls.push([request]);
+          return [segment(request.trackId)];
+        }
+      },
+      structureClient: { async extractStructure() { return validStructure(); } }
+    });
+
+    await expect(
+      services.transcribe(
+        ["system", "microphone"],
+        metadata(),
+        processingPreferences({ uploadSeparateTracks: false })
+      )
+    ).rejects.toThrow("Separate track upload is disabled");
+    expect(calls).toEqual([]);
+  });
+
   test("extracts a validated meeting structure through the configured client", async () => {
     const calls: Parameters<MeetingStructureClient["extractStructure"]>[] = [];
     const services = createProductionWorkflowServices({
@@ -169,5 +262,29 @@ describe("createProductionWorkflowServices", () => {
         }
       ]
     ]);
+  });
+
+  test("passes structure preferences to the meeting intelligence provider", async () => {
+    const calls: Parameters<MeetingStructureClient["extractStructure"]>[] = [];
+    const preferences = processingPreferences({
+      preserveTranscriptLanguage: false,
+      useOutputLanguage: false
+    });
+    const services = createProductionWorkflowServices({
+      transcriptionClient: { async transcribeChunk() { return []; } },
+      structureClient: {
+        async extractStructure(request) {
+          calls.push([request]);
+          return validStructure();
+        }
+      }
+    });
+
+    await services.extractStructure([segment("system")], metadata(), preferences);
+
+    expect(calls[0]?.[0]).toMatchObject({
+      preserveTranscriptLanguage: false,
+      useOutputLanguage: false
+    });
   });
 });

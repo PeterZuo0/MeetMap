@@ -179,8 +179,8 @@ export function ProcessingScreen({
       <div className="processing-privacy-note">
         {label(
           lang,
-          "Tracks uploaded encrypted; auto-deleted from cloud after processing.",
-          "\u97f3\u9891\u4ee5\u52a0\u5bc6\u65b9\u5f0f\u4e0a\u4f20\uff0c\u5904\u7406\u5b8c\u6210\u540e\u81ea\u52a8\u4ece\u4e91\u7aef\u5220\u9664\u3002"
+          "Tracks upload encrypted. Cloud copy deletion is requested when the provider supports it; local retry artifacts stay on this PC.",
+          "\u97f3\u9891\u4ee5\u52a0\u5bc6\u65b9\u5f0f\u4e0a\u4f20\u3002\u4f9b\u5e94\u5546\u652f\u6301\u65f6\u4f1a\u8bf7\u6c42\u5220\u9664\u4e91\u7aef\u526f\u672c\uff1b\u672c\u5730\u91cd\u8bd5\u4ea7\u7269\u4fdd\u7559\u5728\u6b64\u7535\u8111\u3002"
         )}
       </div>
     </section>

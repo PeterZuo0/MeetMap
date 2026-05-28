@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import type { MeetingMetadata, ProcessingStep, SummaryStyle } from "../features/meetings/meetingTypes";
 import type { LanguageOptionValue } from "../features/settings/languageOptions";
+import type { ProcessingPreferences } from "../features/settings/processingPreferences";
 import type {
   AppSettings,
+  ExportOptions,
   RecordingAudioDevice,
   RecordingAudioLevel,
   RecordingAudioSources,
@@ -208,7 +210,7 @@ export function App() {
     }, 120);
 
     try {
-      const processedMeeting = await api.processMeeting(meetingId);
+      const processedMeeting = await api.processMeeting(meetingId, buildProcessingPreferences(settings));
       window.clearInterval(interval);
       setMeeting(processedMeeting);
       setActiveStep(processedMeeting.processingStep ?? "completed");
@@ -243,7 +245,7 @@ export function App() {
     }
   }
 
-  async function openExport(kind: "word" | "html") {
+  async function openExport(kind: "word" | "html", options?: ExportOptions) {
     if (!api || !meeting) {
       setExportError("Export is not available yet");
       return;
@@ -251,7 +253,7 @@ export function App() {
 
     setExportError(null);
     try {
-      await api.openExport({ meetingId: meeting.id, kind });
+      await api.openExport({ meetingId: meeting.id, kind, options });
     } catch (caughtError) {
       setExportError(formatError(caughtError));
     }
@@ -335,9 +337,13 @@ export function App() {
         {phase === "detail" ? (
           <DetailScreen
             exportError={exportError}
+            exportDefaults={{
+              includeTimestamps: settings.includeTimestamps,
+              includeTranscriptAppendix: settings.includeTranscriptAppendix
+            }}
             lang={settings.uiLanguage}
             meeting={meeting}
-            onExport={(kind) => void openExport(kind)}
+            onExport={(kind, options) => void openExport(kind, options)}
           />
         ) : null}
         {phase === "settings" ? (
@@ -355,6 +361,24 @@ export function App() {
 
 function formatError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function buildProcessingPreferences(settings: AppSettings): ProcessingPreferences {
+  return {
+    autoDeleteCloudCopies: settings.autoDeleteCloudCopies,
+    preserveTranscriptLanguage: settings.preserveTranscriptLanguage,
+    recognitionLanguages: {
+      cantonese: settings.cantonese,
+      englishGB: settings.englishGB,
+      englishUS: settings.englishUS,
+      mandarin: settings.mandarin,
+      mixedCodeSwitching: settings.mixedCodeSwitching
+    },
+    speakerDiarization: settings.speakerDiarization,
+    uploadRecordedAudio: settings.uploadRecordedAudio,
+    uploadSeparateTracks: settings.uploadSeparateTracks,
+    useOutputLanguage: settings.useOutputLanguage
+  };
 }
 
 function deriveDetectedAudioSources(

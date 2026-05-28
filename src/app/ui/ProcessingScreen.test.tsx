@@ -25,7 +25,7 @@ test("renders the template processing status, phase details, and background acti
   expect(screen.getByText(/Uploading tracks to cloud/)).toBeInTheDocument();
   expect(screen.getByText(/Speech-to-text/)).toBeInTheDocument();
   expect(screen.getByText(/Summary & action items/)).toBeInTheDocument();
-  expect(screen.getByText(/Tracks uploaded encrypted/)).toBeInTheDocument();
+  expect(screen.getByText(/Cloud copy deletion is requested when the provider supports it/)).toBeInTheDocument();
 
   fireEvent.click(screen.getByRole("button", { name: /Run in background/ }));
   expect(onBack).toHaveBeenCalled();

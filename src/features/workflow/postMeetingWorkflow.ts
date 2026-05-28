@@ -13,16 +13,19 @@ import type { MeetingStructure, SourceReference } from "../intelligence/meetingS
 import { validateMeetingStructure } from "../intelligence/meetingStructureSchema.js";
 import { createWordSummaryDocx } from "../exports/word/wordExport.js";
 import { createHtmlMeetingMap } from "../exports/html-map/htmlMapExport.js";
+import type { ProcessingPreferences } from "../settings/processingPreferences.js";
 
 export type PostMeetingWorkflowServices = {
   detectActivity(tracks: MeetingAudioTracks): Promise<VoiceActivityDecision>;
   transcribe(
     tracksToProcess: VoiceActivityDecision["tracksToProcess"],
-    metadata: MeetingMetadata
+    metadata: MeetingMetadata,
+    preferences?: ProcessingPreferences
   ): Promise<TranscriptSegment[]>;
   extractStructure(
     transcript: TranscriptSegment[],
-    metadata: MeetingMetadata
+    metadata: MeetingMetadata,
+    preferences?: ProcessingPreferences
   ): Promise<MeetingStructure>;
 };
 
@@ -32,6 +35,7 @@ export type ProcessMeetingInput = {
   services?: PostMeetingWorkflowServices;
   mode?: "production" | "demo";
   onStepChange?: (step: ProcessingStep) => void;
+  preferences?: ProcessingPreferences;
 };
 
 export type ProcessMeetingResult = {
@@ -45,7 +49,8 @@ export async function processMeeting({
   meetingId,
   services,
   mode = "production",
-  onStepChange
+  onStepChange,
+  preferences
 }: ProcessMeetingInput): Promise<ProcessMeetingResult> {
   const workflowServices = resolveWorkflowServices({ mode, services });
   const paths = store.getMeetingPaths(meetingId);
@@ -92,7 +97,7 @@ export async function processMeeting({
     }
 
     await persist("transcription");
-    const transcript = await workflowServices.transcribe(activity.tracksToProcess, metadata);
+    const transcript = await workflowServices.transcribe(activity.tracksToProcess, metadata, preferences);
     await writeFile(paths.transcriptPath, `${JSON.stringify({ segments: transcript }, null, 2)}\n`);
 
     await persist("merge", {
@@ -105,7 +110,7 @@ export async function processMeeting({
     );
 
     await persist("structure_extraction");
-    const structure = await workflowServices.extractStructure(mergedTranscript, metadata);
+    const structure = await workflowServices.extractStructure(mergedTranscript, metadata, preferences);
     const validation = validateMeetingStructure(structure);
     if (!validation.success) {
       throw new Error(`Invalid meeting structure: ${validation.errors.join("; ")}`);

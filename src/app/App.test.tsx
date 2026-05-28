@@ -335,7 +335,13 @@ test("stops, processes, and opens Word exports through the export dialog", async
     expect(api.stopRecording).toHaveBeenCalled();
   });
   await waitFor(() => {
-    expect(api.processMeeting).toHaveBeenCalledWith("meeting-1");
+    expect(api.processMeeting).toHaveBeenCalledWith(
+      "meeting-1",
+      expect.objectContaining({
+        uploadRecordedAudio: true,
+        uploadSeparateTracks: true
+      })
+    );
   });
   expect(await screen.findByRole("heading", { name: "Meeting detail" })).toBeInTheDocument();
 
@@ -346,7 +352,14 @@ test("stops, processes, and opens Word exports through the export dialog", async
   expect(within(dialog).getByLabelText(/Embedded audio/)).toBeDisabled();
 
   fireEvent.click(within(dialog).getByRole("button", { name: /^Export/ }));
-  expect(api.openExport).toHaveBeenCalledWith({ meetingId: "meeting-1", kind: "word" });
+  expect(api.openExport).toHaveBeenCalledWith({
+    meetingId: "meeting-1",
+    kind: "word",
+    options: expect.objectContaining({
+      transcript: true,
+      timestamps: true
+    })
+  });
 });
 
 test("opens HTML exports from the export dialog format card", async () => {
@@ -362,10 +375,84 @@ test("opens HTML exports from the export dialog format card", async () => {
   fireEvent.click(screen.getByRole("button", { name: /^Export/ }));
   const dialog = screen.getByRole("dialog", { name: /Export meeting/ });
   fireEvent.click(within(dialog).getByRole("radio", { name: /Structure map/ }));
-  expect(within(dialog).getByLabelText(/Embedded audio/)).not.toBeDisabled();
+  expect(within(dialog).getByLabelText(/Embedded audio/)).toBeDisabled();
 
   fireEvent.click(within(dialog).getByRole("button", { name: /^Export/ }));
-  expect(api.openExport).toHaveBeenCalledWith({ meetingId: "meeting-1", kind: "html" });
+  expect(api.openExport).toHaveBeenCalledWith({
+    meetingId: "meeting-1",
+    kind: "html",
+    options: expect.objectContaining({
+      audio: false,
+      map: true
+    })
+  });
+});
+
+test("uses export defaults from Settings in the export dialog", async () => {
+  const api = installApi();
+  render(<App />);
+
+  fireEvent.click(screen.getByRole("button", { name: /Settings/ }));
+  fireEvent.click(screen.getByRole("button", { name: /Export defaults/ }));
+  fireEvent.click(screen.getByRole("switch", { name: /Include transcript appendix/ }));
+  fireEvent.click(screen.getByRole("switch", { name: /Include timestamps/ }));
+
+  fireEvent.click(screen.getAllByRole("button", { name: /New recording/ })[0]);
+  fireEvent.click(screen.getByRole("button", { name: /Start recording/ }));
+  await screen.findByRole("heading", { name: /Roadmap review/ });
+  fireEvent.click(screen.getByRole("button", { name: /Stop.*process/ }));
+  expect(await screen.findByRole("heading", { name: "Meeting detail" })).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: /^Export/ }));
+  const dialog = screen.getByRole("dialog", { name: /Export meeting/ });
+
+  expect(within(dialog).getByLabelText(/Full transcript/)).not.toBeChecked();
+  expect(within(dialog).getByLabelText(/Timestamps/)).not.toBeChecked();
+  fireEvent.click(within(dialog).getByRole("button", { name: /^Export/ }));
+
+  expect(api.openExport).toHaveBeenCalledWith({
+    meetingId: "meeting-1",
+    kind: "word",
+    options: expect.objectContaining({
+      transcript: false,
+      timestamps: false
+    })
+  });
+});
+
+test("passes processing preferences from Settings into post-meeting processing", async () => {
+  const api = installApi();
+  render(<App />);
+
+  fireEvent.click(screen.getByRole("button", { name: /Settings/ }));
+  fireEvent.click(screen.getByRole("button", { name: /Privacy & storage/ }));
+  fireEvent.click(screen.getByRole("switch", { name: /Upload microphone and system tracks separately/ }));
+  fireEvent.click(screen.getByRole("switch", { name: /Request cloud copy deletion when supported/ }));
+  fireEvent.click(screen.getByRole("button", { name: /Transcription & summary/ }));
+  fireEvent.click(screen.getByRole("switch", { name: /Speaker diarization/ }));
+
+  fireEvent.click(screen.getAllByRole("button", { name: /New recording/ })[0]);
+  fireEvent.click(screen.getByRole("button", { name: /Start recording/ }));
+  await screen.findByRole("heading", { name: /Roadmap review/ });
+  fireEvent.click(screen.getByRole("button", { name: /Stop.*process/ }));
+
+  await waitFor(() => {
+    expect(api.processMeeting).toHaveBeenCalledWith("meeting-1", {
+      autoDeleteCloudCopies: false,
+      preserveTranscriptLanguage: true,
+      recognitionLanguages: {
+        cantonese: false,
+        englishGB: false,
+        englishUS: true,
+        mandarin: true,
+        mixedCodeSwitching: true
+      },
+      speakerDiarization: false,
+      uploadRecordedAudio: true,
+      uploadSeparateTracks: false,
+      useOutputLanguage: true
+    });
+  });
 });
 
 test("supports transcript search and track filtering in meeting detail", async () => {

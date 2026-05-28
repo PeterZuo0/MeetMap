@@ -91,6 +91,44 @@ describe("createOpenAiTranscriptionClient", () => {
     expect(calls[0][0].timestampGranularities).toBeUndefined();
   });
 
+  test("passes recognition language preferences to the OpenAI transcription boundary", async () => {
+    const calls: Parameters<OpenAiAudioTranscriptionRequester>[] = [];
+    const client = createOpenAiTranscriptionClient({
+      apiKey: "test-key",
+      model: "gpt-4o-mini-transcribe",
+      async requestTranscription(request) {
+        calls.push([request]);
+        return {
+          text: "Mixed meeting.",
+          language: "en"
+        };
+      }
+    });
+
+    await client.transcribeChunk({
+      id: "chunk-1",
+      index: 0,
+      trackId: "system",
+      filePath: "system.wav",
+      recognitionLanguages: {
+        cantonese: false,
+        englishGB: false,
+        englishUS: true,
+        mandarin: true,
+        mixedCodeSwitching: true
+      },
+      speakerDiarization: false,
+      startOffsetMs: 0,
+      autoDeleteCloudCopies: true,
+      uploadSeparateTracks: false
+    });
+
+    expect(calls[0]?.[0]).toMatchObject({
+      prompt: "Expected speech languages: Mandarin Chinese, English (US). Mixed Chinese-English code-switching is likely. Speaker diarization requested: no. Separate track processing requested: no. Cloud copy deletion requested when supported: yes."
+    });
+    expect(calls[0]?.[0].language).toBeUndefined();
+  });
+
   test("falls back to one segment when provider does not return segment timings", async () => {
     const client = createOpenAiTranscriptionClient({
       apiKey: "test-key",

@@ -18,6 +18,8 @@ export type OpenAiAudioTranscriptionRequest = {
   apiKey: string;
   model: string;
   filePath: string;
+  language?: "en" | "zh";
+  prompt?: string;
   responseFormat: "json" | "verbose_json";
   timestampGranularities?: ["segment"];
 };
@@ -47,12 +49,13 @@ export function createOpenAiTranscriptionClient({
     async transcribeChunk(request) {
       try {
         const responseOptions = createTranscriptionResponseOptions(model);
-        const response = await requestTranscription({
-          apiKey,
-          model,
-          filePath: request.filePath,
-          ...responseOptions
-        });
+	        const response = await requestTranscription({
+	          apiKey,
+	          model,
+	          filePath: request.filePath,
+	          ...createTranscriptionPreferenceOptions(request),
+	          ...responseOptions
+	        });
 
         return mapOpenAiResponseToTranscriptSegments(request, response);
       } catch (error) {
@@ -60,6 +63,68 @@ export function createOpenAiTranscriptionClient({
       }
     }
   };
+}
+
+function createTranscriptionPreferenceOptions(
+  request: TranscriptionChunkRequest
+): Pick<OpenAiAudioTranscriptionRequest, "language" | "prompt"> {
+  const expectedLanguages = formatRecognitionLanguages(request.recognitionLanguages);
+  const promptParts: string[] = [];
+
+  if (expectedLanguages.length > 0) {
+    promptParts.push(`Expected speech languages: ${expectedLanguages.join(", ")}.`);
+  }
+
+  if (request.recognitionLanguages?.mixedCodeSwitching) {
+    promptParts.push("Mixed Chinese-English code-switching is likely.");
+  }
+
+  if (request.speakerDiarization !== undefined) {
+    promptParts.push(`Speaker diarization requested: ${request.speakerDiarization ? "yes" : "no"}.`);
+  }
+
+  if (request.uploadSeparateTracks !== undefined) {
+    promptParts.push(`Separate track processing requested: ${request.uploadSeparateTracks ? "yes" : "no"}.`);
+  }
+
+  if (request.autoDeleteCloudCopies !== undefined) {
+    promptParts.push(`Cloud copy deletion requested when supported: ${request.autoDeleteCloudCopies ? "yes" : "no"}.`);
+  }
+
+  return {
+    language: inferSingleLanguage(request),
+    prompt: promptParts.length > 0 ? promptParts.join(" ") : undefined
+  };
+}
+
+function formatRecognitionLanguages(
+  languages: TranscriptionChunkRequest["recognitionLanguages"]
+): string[] {
+  if (!languages) {
+    return [];
+  }
+
+  return [
+    languages.mandarin ? "Mandarin Chinese" : null,
+    languages.cantonese ? "Cantonese" : null,
+    languages.englishUS ? "English (US)" : null,
+    languages.englishGB ? "English (GB)" : null
+  ].filter((item): item is string => Boolean(item));
+}
+
+function inferSingleLanguage(request: TranscriptionChunkRequest): OpenAiAudioTranscriptionRequest["language"] {
+  const languages = request.recognitionLanguages;
+  if (!languages || languages.mixedCodeSwitching) {
+    return undefined;
+  }
+
+  const chineseEnabled = Boolean(languages.mandarin || languages.cantonese);
+  const englishEnabled = Boolean(languages.englishUS || languages.englishGB);
+  if (chineseEnabled === englishEnabled) {
+    return undefined;
+  }
+
+  return chineseEnabled ? "zh" : "en";
 }
 
 function createTranscriptionResponseOptions(

@@ -20,8 +20,8 @@ contextBridge.exposeInMainWorld("meetMap", {
     ipcRenderer.on("recording:level", listener);
     return () => ipcRenderer.off("recording:level", listener);
   },
-  processMeeting: (meetingId: string) =>
-    ipcRenderer.invoke("meeting:process", meetingId),
-  openExport: (input: { meetingId: string; kind: "word" | "html" }) =>
+  processMeeting: (meetingId: string, preferences?: unknown) =>
+    ipcRenderer.invoke("meeting:process", meetingId, preferences),
+  openExport: (input: { meetingId: string; kind: "word" | "html"; options?: unknown }) =>
     ipcRenderer.invoke("meeting:open-export", input)
 });
