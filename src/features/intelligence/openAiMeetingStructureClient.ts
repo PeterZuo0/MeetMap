@@ -1,9 +1,9 @@
-import type { MeetingStructure } from "./meetingStructure";
+import type { MeetingStructure } from "./meetingStructure.js";
 import type {
   MeetingStructureClient,
   MeetingStructureRequest
-} from "./meetingStructureClient";
-import { validateMeetingStructure } from "./meetingStructureSchema";
+} from "./meetingStructureClient.js";
+import { validateMeetingStructure } from "./meetingStructureSchema.js";
 
 export type OpenAiJsonSchemaFormat = {
   type: "json_schema";

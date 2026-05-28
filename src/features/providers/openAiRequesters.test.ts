@@ -54,6 +54,38 @@ describe("createOpenAiAudioTranscriptionRequester", () => {
     expect(init.body.get("timestamp_granularities[]")).toBe("segment");
     expect(init.body.get("file")).toBeInstanceOf(File);
   });
+
+  test("does not expose provider-supplied API key fragments in auth failures", async () => {
+    const requester = createOpenAiAudioTranscriptionRequester({
+      async readFile() {
+        return new Uint8Array([1, 2, 3]);
+      },
+      async fetch() {
+        return {
+          ok: false,
+          status: 401,
+          async json() {
+            return {
+              error: {
+                message: "Incorrect API key provided: sk-secret-fragment.",
+                code: "invalid_api_key"
+              }
+            };
+          }
+        };
+      }
+    });
+
+    await expect(
+      requester({
+        apiKey: "test-key",
+        model: "gpt-4o-mini-transcribe",
+        filePath: "system.wav",
+        responseFormat: "verbose_json",
+        timestampGranularities: ["segment"]
+      })
+    ).rejects.toThrow("OpenAI request failed: invalid API key.");
+  });
 });
 
 describe("createOpenAiMeetingStructureRequester", () => {

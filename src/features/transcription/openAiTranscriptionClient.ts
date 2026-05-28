@@ -2,8 +2,8 @@ import {
   createTranscriptionError,
   type TranscriptionClient,
   type TranscriptionChunkRequest
-} from "./transcriptionClient";
-import type { TranscriptSegment } from "./transcriptionTypes";
+} from "./transcriptionClient.js";
+import type { TranscriptSegment } from "./transcriptionTypes.js";
 
 export type OpenAiTranscriptionSegment = {
   id?: string | number;

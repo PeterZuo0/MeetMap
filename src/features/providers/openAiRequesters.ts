@@ -3,11 +3,11 @@ import { basename } from "node:path";
 import type {
   OpenAiAudioTranscriptionRequester,
   OpenAiAudioTranscriptionResponse
-} from "../transcription/openAiTranscriptionClient";
+} from "../transcription/openAiTranscriptionClient.js";
 import type {
   OpenAiMeetingStructureRequester,
   OpenAiMeetingStructureResponse
-} from "../intelligence/openAiMeetingStructureClient";
+} from "../intelligence/openAiMeetingStructureClient.js";
 
 const OPENAI_AUDIO_TRANSCRIPTIONS_URL =
   "https://api.openai.com/v1/audio/transcriptions";
@@ -164,12 +164,14 @@ function findResponsesOutputText(output: unknown): string | undefined {
 
 function createOpenAiHttpError(json: unknown, status: number): Error {
   const providerError = isRecord(json) && isRecord(json.error) ? json.error : {};
-  const message =
-    typeof providerError.message === "string"
-      ? providerError.message
-      : `OpenAI request failed with status ${status}`;
   const code =
     typeof providerError.code === "string" ? providerError.code : undefined;
+  const message =
+    code === "invalid_api_key"
+      ? "OpenAI request failed: invalid API key."
+      : typeof providerError.message === "string"
+      ? providerError.message
+      : `OpenAI request failed with status ${status}`;
 
   return Object.assign(new Error(message), {
     status,

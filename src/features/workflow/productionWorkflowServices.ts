@@ -1,13 +1,13 @@
-import { decideVoiceActivity } from "../audio-analysis/voiceActivity";
-import type { MeetingStructureClient } from "../intelligence/meetingStructureClient";
-import { extractValidatedMeetingStructure } from "../intelligence/meetingStructureClient";
-import type { AudioTrackId, MeetingMetadata } from "../meetings/meetingTypes";
+import { decideVoiceActivity } from "../audio-analysis/voiceActivity.js";
+import type { MeetingStructureClient } from "../intelligence/meetingStructureClient.js";
+import { extractValidatedMeetingStructure } from "../intelligence/meetingStructureClient.js";
+import type { AudioTrackId, MeetingMetadata } from "../meetings/meetingTypes.js";
 import {
   transcribeChunks,
   type TranscriptionChunkRequest,
   type TranscriptionClient
-} from "../transcription/transcriptionClient";
-import type { PostMeetingWorkflowServices } from "./postMeetingWorkflow";
+} from "../transcription/transcriptionClient.js";
+import type { PostMeetingWorkflowServices } from "./postMeetingWorkflow.js";
 
 export type ProductionWorkflowServicesOptions = {
   transcriptionClient: TranscriptionClient;
