@@ -18,6 +18,7 @@ type IconName =
   | "record"
   | "search"
   | "settings"
+  | "share"
   | "spark"
   | "stop"
   | "users"
@@ -176,6 +177,16 @@ export function Icon({
           <path d="m16.3 16.3 1.4 1.4" />
           <path d="m17.7 6.3-1.4 1.4" />
           <path d="m7.7 16.3-1.4 1.4" />
+        </svg>
+      );
+    case "share":
+      return (
+        <svg {...common}>
+          <circle cx="18" cy="5" r="3" />
+          <circle cx="6" cy="12" r="3" />
+          <circle cx="18" cy="19" r="3" />
+          <path d="m8.6 10.7 6.8-4.4" />
+          <path d="m8.6 13.3 6.8 4.4" />
         </svg>
       );
     case "spark":
