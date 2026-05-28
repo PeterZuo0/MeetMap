@@ -6,7 +6,6 @@ import { Icon } from "./icons";
 type NavTarget = "library" | "pre" | "settings";
 
 export function MeetMapShell({
-  title,
   current,
   lang,
   recording,
@@ -15,7 +14,6 @@ export function MeetMapShell({
   children,
   onNav
 }: {
-  title: string;
   current: WorkflowPhase;
   lang: UiLanguage;
   recording: boolean;
@@ -26,17 +24,6 @@ export function MeetMapShell({
 }) {
   return (
     <div className="win-window">
-      <div className="win-titlebar">
-        <div className="win-title">
-          <span className="brand-dot" />
-          <span>{title}</span>
-        </div>
-        <div className="win-controls" aria-hidden="true">
-          <button tabIndex={-1}>-</button>
-          <button tabIndex={-1}>□</button>
-          <button tabIndex={-1}>x</button>
-        </div>
-      </div>
       <div className="app-body">
         <Sidebar current={current} lang={lang} recording={recording} onNav={onNav} />
         <main className="main">

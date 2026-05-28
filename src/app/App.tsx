@@ -171,7 +171,6 @@ export function App() {
         lang={settings.uiLanguage}
         onNav={(target) => navigate(target)}
         recording={phase === "recording"}
-        title={`MeetMap - ${crumbs[crumbs.length - 1]}`}
       >
         {phase === "library" ? (
           <LibraryScreen

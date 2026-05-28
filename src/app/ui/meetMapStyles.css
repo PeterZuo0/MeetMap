@@ -72,45 +72,25 @@ button {
 }
 
 .meetmap-root {
-  min-height: 100vh;
-  display: grid;
-  place-items: center;
-  padding: 32px;
+  height: 100vh;
+  min-height: 0;
+  display: flex;
+  padding: 0;
   background: var(--bg);
+  overflow: hidden;
 }
 
 .win-window {
-  width: min(1320px, calc(100vw - 40px));
-  height: min(840px, calc(100vh - 40px));
-  min-height: 680px;
+  width: 100vw;
+  height: 100vh;
+  min-height: 0;
   background: var(--surface);
-  border-radius: 10px;
-  box-shadow: var(--window-shadow);
+  border-radius: 0;
+  box-shadow: none;
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  border: 1px solid var(--border);
-}
-
-.win-titlebar {
-  height: 36px;
-  background: var(--titlebar);
-  display: flex;
-  align-items: center;
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-  user-select: none;
-  -webkit-app-region: drag;
-}
-
-.win-title {
-  padding: 0 14px;
-  font-size: 12px;
-  color: var(--text-muted);
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex: 1;
+  border: 0;
 }
 
 .brand-dot,
@@ -119,26 +99,6 @@ button {
   height: 14px;
   border-radius: 3px;
   background: linear-gradient(135deg, var(--accent), #9b7cff);
-}
-
-.win-controls {
-  display: flex;
-  height: 100%;
-}
-
-.win-controls button {
-  width: 46px;
-  height: 100%;
-  border: 0;
-  background: transparent;
-  color: var(--text-muted);
-  display: grid;
-  place-items: center;
-}
-
-.win-controls button:hover {
-  background: var(--hover);
-  color: var(--text);
 }
 
 .app-body {

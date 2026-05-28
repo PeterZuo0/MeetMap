@@ -56,10 +56,12 @@ afterEach(() => {
 });
 
 test("renders the migrated library shell by default", () => {
-  render(<App />);
+  const { container } = render(<App />);
 
   expect(screen.getByRole("heading", { name: /All meetings/ })).toBeInTheDocument();
   expect(screen.getAllByRole("button", { name: /New recording/ })).not.toHaveLength(0);
+  expect(screen.queryByText(/MeetMap - All meetings/)).not.toBeInTheDocument();
+  expect(container.querySelector(".win-titlebar")).not.toBeInTheDocument();
   expect(screen.queryByText(/Post-meeting workflow/)).not.toBeInTheDocument();
   expect(screen.queryByText(/Tweaks/)).not.toBeInTheDocument();
 });
