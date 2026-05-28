@@ -122,3 +122,25 @@ test("moves prototype tweaks into Settings General", () => {
   expect(screen.getByLabelText(/UI language/)).toHaveValue("bi");
   expect(screen.getByLabelText(/Default output language/)).toBeInTheDocument();
 });
+
+test("renders settings sub-pages from the template navigation", () => {
+  render(<App />);
+
+  fireEvent.click(screen.getByRole("button", { name: /Settings/ }));
+
+  fireEvent.click(screen.getByRole("button", { name: /Language/ }));
+  expect(screen.getByRole("heading", { name: "Language" })).toBeInTheDocument();
+  expect(screen.getByText(/Recognition languages/)).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: /Audio devices/ }));
+  expect(screen.getByRole("heading", { name: "Audio devices" })).toBeInTheDocument();
+  expect(screen.getByText(/System audio capture/)).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: /API keys/ }));
+  expect(screen.getByRole("heading", { name: "API keys" })).toBeInTheDocument();
+  expect(screen.getByText(/OpenAI/)).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: /Privacy & storage/ }));
+  expect(screen.getByRole("heading", { name: "Privacy & storage" })).toBeInTheDocument();
+  expect(screen.getByText(/What gets uploaded/)).toBeInTheDocument();
+});
