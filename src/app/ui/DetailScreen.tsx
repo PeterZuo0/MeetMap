@@ -19,6 +19,7 @@ export function DetailScreen({
   onExport(kind: "word" | "html"): void;
 }) {
   const [tab, setTab] = useState<DetailTab>("transcript");
+  const isNoAudio = meeting?.status === "no_audio";
 
   return (
     <section className="pane" aria-label="Meeting detail">
@@ -27,7 +28,7 @@ export function DetailScreen({
           <h1 className="h1">Meeting detail</h1>
           <p className="sub">{meeting?.title ?? "Q3 roadmap review"}</p>
         </div>
-        <div style={{ display: "flex", gap: 8 }}>
+        <div style={{ display: isNoAudio ? "none" : "flex", gap: 8 }}>
           <button className="btn" onClick={() => onExport("word")} type="button">
             <Icon name="download" size={13} />
             Open Word summary
@@ -41,7 +42,16 @@ export function DetailScreen({
 
       {exportError ? <div className="error-box">{exportError}</div> : null}
 
-      <div className="tabs" role="tablist" aria-label="Meeting detail views">
+      {isNoAudio ? (
+        <div className="no-audio-result">
+          <h2 className="h2">No speech was detected</h2>
+          <p className="sub">
+            MeetMap kept the recording metadata, but did not generate a transcript, summary, Word document, or HTML map because neither recorded track contained speech.
+          </p>
+        </div>
+      ) : null}
+
+      <div className="tabs" role="tablist" aria-label="Meeting detail views" hidden={isNoAudio}>
         <Tab active={tab === "transcript"} onClick={() => setTab("transcript")}>
           {label(lang, "Transcript", "文字记录")}
         </Tab>
@@ -53,9 +63,9 @@ export function DetailScreen({
         </Tab>
       </div>
 
-      {tab === "transcript" ? <Transcript lang={lang} /> : null}
-      {tab === "summary" ? <Summary lang={lang} meeting={meeting} /> : null}
-      {tab === "map" ? <MapPreview lang={lang} /> : null}
+      {!isNoAudio && tab === "transcript" ? <Transcript lang={lang} /> : null}
+      {!isNoAudio && tab === "summary" ? <Summary lang={lang} meeting={meeting} /> : null}
+      {!isNoAudio && tab === "map" ? <MapPreview lang={lang} /> : null}
     </section>
   );
 }

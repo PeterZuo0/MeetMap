@@ -1,7 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import type { MeetingMetadata, ProcessingStep } from "../features/meetings/meetingTypes";
 import type { LanguageOptionValue } from "../features/settings/languageOptions";
-import type { AppSettings, WorkflowPhase } from "./meetMapApi";
+import type {
+  AppSettings,
+  RecordingAudioDevice,
+  RecordingAudioSources,
+  WorkflowPhase
+} from "./meetMapApi";
 import { DetailScreen } from "./ui/DetailScreen";
 import { LibraryScreen } from "./ui/LibraryScreen";
 import { MeetMapShell } from "./ui/MeetMapShell";
@@ -20,6 +25,16 @@ export function App() {
   const [draftOutputLanguage, setDraftOutputLanguage] = useState<LanguageOptionValue>(
     settings.defaultOutputLanguage
   );
+  const [draftAudioSources, setDraftAudioSources] = useState<RecordingAudioSources>({
+    system: true,
+    microphone: true
+  });
+  const [audioDevices, setAudioDevices] = useState<RecordingAudioDevice[]>([]);
+  const [selectedAudioDeviceIds, setSelectedAudioDeviceIds] = useState<Partial<Record<"system" | "microphone", string>>>({});
+  const [activeAudioSources, setActiveAudioSources] = useState<RecordingAudioSources>({
+    system: true,
+    microphone: true
+  });
   const [isStarting, setIsStarting] = useState(false);
   const [isStopping, setIsStopping] = useState(false);
   const [activeStep, setActiveStep] = useState<ProcessingStep>("activity_detection");
@@ -33,6 +48,29 @@ export function App() {
     document.documentElement.style.setProperty("--accent-text", settings.accent);
     document.documentElement.style.setProperty("--accent-soft", `${settings.accent}1f`);
   }, [settings]);
+
+  useEffect(() => {
+    if (phase !== "pre" || !api?.listAudioDevices) {
+      return;
+    }
+
+    let cancelled = false;
+    void api.listAudioDevices().then((devices) => {
+      if (cancelled) {
+        return;
+      }
+
+      setAudioDevices(devices);
+      setSelectedAudioDeviceIds((current) => ({
+        system: current.system ?? devices.find((device) => device.track === "system")?.id,
+        microphone: current.microphone ?? devices.find((device) => device.track === "microphone")?.id
+      }));
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [api, phase]);
 
   const crumbs = useMemo(() => {
     switch (phase) {
@@ -57,6 +95,7 @@ export function App() {
     setPhase(nextPhase);
     if (nextPhase === "pre") {
       setDraftOutputLanguage(settings.defaultOutputLanguage);
+      setDraftAudioSources({ system: true, microphone: true });
     }
   }
 
@@ -66,11 +105,7 @@ export function App() {
       return;
     }
 
-    const title = draftTitle.trim();
-    if (!title) {
-      setError("Meeting title is required");
-      return;
-    }
+    const title = draftTitle.trim() || `Untitled meeting · ${new Date().toLocaleDateString()}`;
 
     setIsStarting(true);
     setError(null);
@@ -79,7 +114,11 @@ export function App() {
         title,
         outputLanguage: draftOutputLanguage
       });
-      const recordingMeeting = await api.startRecording(createdMeeting.id);
+      const recordingMeeting = await api.startRecording(createdMeeting.id, {
+        audioSources: draftAudioSources,
+        deviceIds: selectedAudioDeviceIds
+      });
+      setActiveAudioSources(draftAudioSources);
       setMeeting(recordingMeeting);
       setPhase("recording");
     } catch (caughtError) {
@@ -187,8 +226,15 @@ export function App() {
             lang={settings.uiLanguage}
             onCancel={() => navigate("library")}
             onOutputLanguageChange={setDraftOutputLanguage}
+            onAudioSourcesChange={setDraftAudioSources}
+            onDeviceChange={(track, deviceId) =>
+              setSelectedAudioDeviceIds((current) => ({ ...current, [track]: deviceId }))
+            }
             onStart={() => void startRecording()}
             onTitleChange={setDraftTitle}
+            audioSources={draftAudioSources}
+            devices={audioDevices}
+            selectedDeviceIds={selectedAudioDeviceIds}
             outputLanguage={draftOutputLanguage}
             title={draftTitle}
           />
@@ -197,6 +243,7 @@ export function App() {
           <RecordingScreen
             error={error}
             isStopping={isStopping}
+            audioSources={activeAudioSources}
             lang={settings.uiLanguage}
             meeting={meeting}
             onStop={() => void stopRecording()}
