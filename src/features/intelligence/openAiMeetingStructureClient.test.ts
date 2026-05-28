@@ -90,6 +90,31 @@ describe("createOpenAiMeetingStructureClient", () => {
     expect(calls[0][0].input).toContain("We decided to keep the export workflow in scope.");
   });
 
+  test("passes output language preferences to the OpenAI structure prompt", async () => {
+    const calls: Parameters<OpenAiMeetingStructureRequester>[] = [];
+    const requester: OpenAiMeetingStructureRequester = async (openAiRequest) => {
+      calls.push([openAiRequest]);
+      return { outputJson: validStructure() };
+    };
+    const client = createOpenAiMeetingStructureClient({
+      apiKey: "test-key",
+      model: "gpt-4.1-mini",
+      requestStructure: requester
+    });
+
+    await client.extractStructure({
+      ...request,
+      preserveTranscriptLanguage: false,
+      useOutputLanguage: false
+    });
+
+    expect(calls[0]?.[0].instructions).toContain("Do not force generated summary fields into the output language setting.");
+    expect(calls[0]?.[0].instructions).not.toContain("Write the final summary, topic titles, decisions, action items, questions, and risks in bilingual.");
+    expect(calls[0]?.[0].instructions).toContain("Normalize transcript language when useful instead of preserving original wording.");
+    expect(calls[0]?.[0].input).toContain('"preserveTranscriptLanguage":false');
+    expect(calls[0]?.[0].input).toContain('"useOutputLanguage":false');
+  });
+
   test("accepts JSON text responses from the provider boundary", async () => {
     const client = createOpenAiMeetingStructureClient({
       apiKey: "test-key",

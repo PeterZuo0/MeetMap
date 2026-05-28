@@ -99,7 +99,7 @@ test("transcription and summary switches can be changed", () => {
 test("privacy and storage switches can be changed", () => {
   renderSettings("privacy");
 
-  const deleteCloudCopies = screen.getByRole("switch", { name: "Auto-delete cloud processing copies" });
+  const deleteCloudCopies = screen.getByRole("switch", { name: "Request cloud copy deletion when supported" });
   const keepArtifacts = screen.getByRole("switch", { name: "Keep intermediate artifacts" });
 
   expect(deleteCloudCopies).toHaveAttribute("aria-checked", "true");

@@ -113,7 +113,42 @@ test("maps meeting structure JSON to ordered Word summary sections", () => {
     {
       title: "Risks and Follow-ups",
       items: ["Export rendering may drift between Word and HTML outputs. Severity: medium."]
+    },
+    {
+      title: "Source References",
+      items: [
+        "MVP scope: seg-1 0:01-0:05",
+        "Export workflow: seg-2 0:05-0:08",
+        "Ship Word export before HTML map export.: seg-3 0:08-0:12",
+        "Draft the Word export mapper.: seg-4 0:12-0:16",
+        "Which HTML graph layout should the MVP use?: seg-5 0:16-0:20",
+        "Export rendering may drift between Word and HTML outputs.: seg-6 0:20-0:24"
+      ]
     }
+  ]);
+});
+
+test("omits disabled Word export sections and timestamps", () => {
+  const sections = buildWordExportSections(meetingStructure(), {
+    actions: false,
+    audio: false,
+    decisions: false,
+    map: true,
+    timestamps: false,
+    transcript: false
+  });
+
+  expect(sections.map((section) => section.title)).toEqual([
+    "Meeting Overview",
+    "Executive Summary",
+    "Key Topics",
+    "Open Questions",
+    "Risks and Follow-ups"
+  ]);
+  expect(sections[0]?.items).toEqual([
+    "Title: Product planning",
+    "Source language: en",
+    "Output language: en"
   ]);
 });
 

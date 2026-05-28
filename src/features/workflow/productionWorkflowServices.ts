@@ -2,6 +2,7 @@ import { decideVoiceActivity } from "../audio-analysis/voiceActivity.js";
 import type { MeetingStructureClient } from "../intelligence/meetingStructureClient.js";
 import { extractValidatedMeetingStructure } from "../intelligence/meetingStructureClient.js";
 import type { AudioTrackId, MeetingMetadata } from "../meetings/meetingTypes.js";
+import type { ProcessingPreferences } from "../settings/processingPreferences.js";
 import {
   transcribeChunks,
   type TranscriptionChunkRequest,
@@ -40,18 +41,27 @@ export function createProductionWorkflowServices({
       });
     },
 
-    async transcribe(tracksToProcess, metadata) {
+    async transcribe(tracksToProcess, metadata, preferences) {
+      if (preferences?.uploadRecordedAudio === false) {
+        throw new Error("Cloud audio upload is disabled in privacy settings");
+      }
+
+      if (preferences?.uploadSeparateTracks === false && tracksToProcess.length > 1) {
+        throw new Error("Separate track upload is disabled and combined audio upload is not available yet");
+      }
+
       return transcribeChunks(
         transcriptionClient,
         tracksToProcess.map((trackId, index) =>
-          createWholeFileChunkRequest({ trackId, index, metadata })
+          createWholeFileChunkRequest({ trackId, index, metadata, preferences })
         )
       );
     },
 
-    async extractStructure(transcript, metadata) {
+    async extractStructure(transcript, metadata, preferences) {
       return extractValidatedMeetingStructure(structureClient, {
         metadata,
+        preferences,
         transcript
       });
     }
@@ -61,11 +71,13 @@ export function createProductionWorkflowServices({
 function createWholeFileChunkRequest({
   trackId,
   index,
-  metadata
+  metadata,
+  preferences
 }: {
   trackId: AudioTrackId;
   index: number;
   metadata: MeetingMetadata;
+  preferences?: ProcessingPreferences;
 }): TranscriptionChunkRequest {
   const track = metadata.audioTracks[trackId];
 
@@ -78,7 +90,11 @@ function createWholeFileChunkRequest({
     index,
     trackId,
     filePath: track.filePath,
+    autoDeleteCloudCopies: preferences?.autoDeleteCloudCopies,
+    recognitionLanguages: preferences?.recognitionLanguages,
+    speakerDiarization: preferences?.speakerDiarization,
     startOffsetMs: 0,
-    durationMs: track.durationMs
+    durationMs: track.durationMs,
+    uploadSeparateTracks: preferences?.uploadSeparateTracks
   };
 }

@@ -481,14 +481,14 @@ function PrivacySettings({
         <SettingsRow labelText="Upload microphone and system tracks separately">
           <Toggle
             checked={settings.uploadSeparateTracks}
-            labelText="Upload microphone and system tracks separately"
+            labelText="Upload microphone and system tracks separately; disabling blocks dual-track cloud processing until mixed upload is supported"
             onChange={(checked) => onControlChange("uploadSeparateTracks", checked)}
           />
         </SettingsRow>
-        <SettingsRow labelText="Auto-delete cloud processing copies">
+        <SettingsRow labelText="Request cloud copy deletion when supported">
           <Toggle
             checked={settings.autoDeleteCloudCopies}
-            labelText="Auto-delete cloud processing copies"
+            labelText="Request cloud copy deletion when supported"
             onChange={(checked) => onControlChange("autoDeleteCloudCopies", checked)}
           />
         </SettingsRow>

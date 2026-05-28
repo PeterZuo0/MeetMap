@@ -1,13 +1,17 @@
 import { useState } from "react";
 import type { ReactNode } from "react";
 import type { MeetingMetadata } from "../../features/meetings/meetingTypes";
-import type { UiLanguage } from "../meetMapApi";
+import type { ExportOptions, UiLanguage } from "../meetMapApi";
 import { label, text } from "./copy";
 import { Icon } from "./icons";
 
 type DetailTab = "transcript" | "summary" | "map";
 type ExportFormat = "word" | "html";
 type TrackFilter = "both" | "system" | "mic";
+type ExportDefaults = {
+  includeTimestamps: boolean;
+  includeTranscriptAppendix: boolean;
+};
 
 type TranscriptTurn = {
   speaker: string;
@@ -136,12 +140,14 @@ export function DetailScreen({
   lang,
   meeting,
   exportError,
+  exportDefaults,
   onExport
 }: {
   lang: UiLanguage;
   meeting: MeetingMetadata | null;
   exportError: string | null;
-  onExport(kind: "word" | "html"): void;
+  exportDefaults: ExportDefaults;
+  onExport(kind: "word" | "html", options?: ExportOptions): void;
 }) {
   const [tab, setTab] = useState<DetailTab>("transcript");
   const [showExportDialog, setShowExportDialog] = useState(false);
@@ -204,11 +210,12 @@ export function DetailScreen({
 
       {showExportDialog ? (
         <ExportDialog
+          exportDefaults={exportDefaults}
           lang={lang}
           onClose={() => setShowExportDialog(false)}
-          onExport={(kind) => {
+          onExport={(kind, options) => {
             setShowExportDialog(false);
-            onExport(kind);
+            onExport(kind, options);
           }}
         />
       ) : null}
@@ -379,21 +386,23 @@ function MapPreview({ lang, onOpenHtml }: { lang: UiLanguage; onOpenHtml(): void
 }
 
 function ExportDialog({
+  exportDefaults,
   lang,
   onClose,
   onExport
 }: {
+  exportDefaults: ExportDefaults;
   lang: UiLanguage;
   onClose(): void;
-  onExport(kind: ExportFormat): void;
+  onExport(kind: ExportFormat, options: ExportOptions): void;
 }) {
   const [format, setFormat] = useState<ExportFormat>("word");
   const [options, setOptions] = useState<Record<ExportOptionId, boolean>>({
     map: true,
     decisions: true,
     actions: true,
-    transcript: true,
-    timestamps: true,
+    transcript: exportDefaults.includeTranscriptAppendix,
+    timestamps: exportDefaults.includeTimestamps,
     audio: false
   });
 
@@ -446,7 +455,7 @@ function ExportDialog({
           <div className="field-label">{label(lang, "Include", "\u5305\u542b\u5185\u5bb9")}</div>
           <div className="export-option-list">
             {EXPORT_OPTIONS.map((option) => {
-              const disabled = option.id === "audio" && format === "word";
+              const disabled = option.id === "audio";
               return (
                 <label className={`export-option ${disabled ? "disabled" : ""}`} key={option.id}>
                   <input
@@ -479,7 +488,7 @@ function ExportDialog({
           <button className="btn" onClick={onClose} type="button">
             {label(lang, "Cancel", "\u53d6\u6d88")}
           </button>
-          <button className="btn primary" onClick={() => onExport(format)} type="button">
+          <button className="btn primary" onClick={() => onExport(format, options)} type="button">
             <Icon name="download" size={12} />
             {label(lang, "Export", "\u5bfc\u51fa")}
           </button>

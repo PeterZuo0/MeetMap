@@ -1,4 +1,5 @@
 import type { AudioTrackId } from "../meetings/meetingTypes.js";
+import type { RecognitionLanguagePreferences } from "../settings/processingPreferences.js";
 import type { TranscriptSegment } from "./transcriptionTypes.js";
 
 export type TranscriptionChunkId = string;
@@ -12,6 +13,10 @@ export type TranscriptionChunkRequest<
   filePath: string;
   startOffsetMs: number;
   durationMs?: number;
+  autoDeleteCloudCopies?: boolean;
+  recognitionLanguages?: RecognitionLanguagePreferences;
+  speakerDiarization?: boolean;
+  uploadSeparateTracks?: boolean;
 };
 
 export type TranscriptionClient = {

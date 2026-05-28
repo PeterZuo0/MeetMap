@@ -55,6 +55,46 @@ describe("createOpenAiAudioTranscriptionRequester", () => {
     expect(init.body.get("file")).toBeInstanceOf(File);
   });
 
+  test("includes optional transcription language and prompt hints in the request body", async () => {
+    const calls: unknown[] = [];
+    const requester = createOpenAiAudioTranscriptionRequester({
+      async readFile() {
+        return new Uint8Array([1, 2, 3]);
+      },
+      async fetch(input, init) {
+        calls.push([input, init]);
+        return {
+          ok: true,
+          status: 200,
+          async json() {
+            return {
+              text: "hello",
+              language: "en",
+              segments: []
+            };
+          }
+        };
+      }
+    });
+
+    await requester({
+      apiKey: "test-key",
+      model: "gpt-4o-mini-transcribe",
+      filePath: "system.wav",
+      language: "en",
+      prompt: "Expected speech languages: English (US).",
+      responseFormat: "verbose_json",
+      timestampGranularities: ["segment"]
+    });
+
+    const [, init] = calls[0] as [
+      string,
+      { headers: Record<string, string>; body: FormData }
+    ];
+    expect(init.body.get("language")).toBe("en");
+    expect(init.body.get("prompt")).toBe("Expected speech languages: English (US).");
+  });
+
   test("does not expose provider-supplied API key fragments in auth failures", async () => {
     const requester = createOpenAiAudioTranscriptionRequester({
       async readFile() {

@@ -1,10 +1,14 @@
 import type { MeetingStructure } from "../../intelligence/meetingStructure.js";
+import { resolveExportOptions, type ExportOptions } from "../exportOptions.js";
 import { assertValidMeetingGraph, buildMeetingGraph, type MeetingGraph } from "./graphModel.js";
 
 const GRAPH_DATA_TOKEN = "__MEETMAP_GRAPH_JSON__";
 
-export function createHtmlMeetingMap(structure: MeetingStructure): string {
-  return createHtmlMeetingMapFromGraph(buildMeetingGraph(structure));
+export function createHtmlMeetingMap(
+  structure: MeetingStructure,
+  options?: ExportOptions
+): string {
+  return createHtmlMeetingMapFromGraph(filterGraphForExportOptions(buildMeetingGraph(structure), options));
 }
 
 export function createHtmlMeetingMapFromGraph(graph: MeetingGraph): string {
@@ -14,6 +18,51 @@ export function createHtmlMeetingMapFromGraph(graph: MeetingGraph): string {
 
 function serializeForHtml(value: unknown): string {
   return JSON.stringify(value).replace(/</g, "\\u003c");
+}
+
+function filterGraphForExportOptions(graph: MeetingGraph, options?: ExportOptions): MeetingGraph {
+  const resolvedOptions = resolveExportOptions(options);
+  const selectedNodes = graph.nodes
+    .filter((node) => {
+      if (node.type === "topic" || node.type === "point") {
+        return resolvedOptions.map;
+      }
+
+      if (node.type === "decision") {
+        return resolvedOptions.decisions;
+      }
+
+      if (node.type === "action") {
+        return resolvedOptions.actions;
+      }
+
+      return true;
+    })
+    .map((node) => {
+      if (resolvedOptions.timestamps || node.type !== "meeting" || !node.metadata) {
+        return node;
+      }
+
+      const metadata = { ...node.metadata };
+      delete metadata.startedAt;
+      delete metadata.endedAt;
+      return { ...node, metadata };
+    });
+  const selectedNodeIds = new Set(selectedNodes.map((node) => node.id));
+  const nodes = selectedNodes.map((node) => {
+      if (!node.parentId || selectedNodeIds.has(node.parentId)) {
+        return node;
+      }
+
+      const orphanNode = { ...node };
+      delete orphanNode.parentId;
+      return orphanNode;
+    });
+  const nodeIds = new Set(nodes.map((node) => node.id));
+  return {
+    nodes,
+    edges: graph.edges.filter((edge) => nodeIds.has(edge.fromId) && nodeIds.has(edge.toId))
+  };
 }
 
 const HTML_TEMPLATE = String.raw`<!doctype html>

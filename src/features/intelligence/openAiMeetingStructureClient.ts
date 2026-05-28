@@ -74,8 +74,16 @@ export function createOpenAiMeetingStructureClient({
 function createInstructions(request: MeetingStructureRequest): string {
   return [
     "Extract a structured meeting summary from the transcript.",
-    `Write the final summary, topic titles, decisions, action items, questions, and risks in ${request.outputLanguage}.`,
+    request.useOutputLanguage === false
+      ? `Keep generated summary fields in the language that best matches the transcript content; do not force them into ${request.outputLanguage}.`
+      : `Write the final summary, topic titles, decisions, action items, questions, and risks in ${request.outputLanguage}.`,
     `Use the requested summary style: ${formatSummaryStyle(request.summaryStyle)}.`,
+    request.useOutputLanguage === false
+      ? "Do not force generated summary fields into the output language setting."
+      : "Use the output language setting for generated summary fields.",
+    request.preserveTranscriptLanguage === false
+      ? "Normalize transcript language when useful instead of preserving original wording."
+      : "Preserve the original transcript language where transcript wording is included.",
     "Preserve transcript source references by using the provided segment ids and timestamps.",
     "Return only JSON that matches the meeting_structure schema."
   ].join(" ");
@@ -83,14 +91,16 @@ function createInstructions(request: MeetingStructureRequest): string {
 
 function createInput(request: MeetingStructureRequest): string {
   return JSON.stringify({
-    meeting: {
-      meetingId: request.meetingId,
-      title: request.title,
-      startedAt: request.startedAt,
-      endedAt: request.endedAt,
-      outputLanguage: request.outputLanguage,
-      summaryStyle: request.summaryStyle
-    },
+	    meeting: {
+	      meetingId: request.meetingId,
+	      title: request.title,
+	      startedAt: request.startedAt,
+	      endedAt: request.endedAt,
+	      outputLanguage: request.outputLanguage,
+	      preserveTranscriptLanguage: request.preserveTranscriptLanguage,
+	      summaryStyle: request.summaryStyle,
+	      useOutputLanguage: request.useOutputLanguage
+	    },
     transcript: request.transcript
   });
 }

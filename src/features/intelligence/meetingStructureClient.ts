@@ -1,4 +1,5 @@
 import type { MeetingMetadata } from "../meetings/meetingTypes.js";
+import type { ProcessingPreferences } from "../settings/processingPreferences.js";
 import type { TranscriptSegment } from "../transcription/transcriptionTypes.js";
 import type { MeetingStructure } from "./meetingStructure.js";
 import { validateMeetingStructure } from "./meetingStructureSchema.js";
@@ -9,8 +10,10 @@ export type MeetingStructureRequest = {
   startedAt: string;
   endedAt?: string;
   outputLanguage: MeetingMetadata["outputLanguage"];
+  preserveTranscriptLanguage?: boolean;
   summaryStyle: NonNullable<MeetingMetadata["summaryStyle"]>;
   transcript: TranscriptSegment[];
+  useOutputLanguage?: boolean;
 };
 
 export type MeetingStructureClient = {
@@ -19,9 +22,11 @@ export type MeetingStructureClient = {
 
 export function createMeetingStructureRequest({
   metadata,
+  preferences,
   transcript
 }: {
   metadata: MeetingMetadata;
+  preferences?: ProcessingPreferences;
   transcript: TranscriptSegment[];
 }): MeetingStructureRequest {
   return {
@@ -31,8 +36,10 @@ export function createMeetingStructureRequest({
       metadata.timestamps.recordingStartedAt ?? metadata.timestamps.createdAt,
     endedAt: metadata.timestamps.recordingEndedAt,
     outputLanguage: metadata.outputLanguage,
+    preserveTranscriptLanguage: preferences?.preserveTranscriptLanguage,
     summaryStyle: metadata.summaryStyle ?? "decisions_actions",
-    transcript
+    transcript,
+    useOutputLanguage: preferences?.useOutputLanguage
   };
 }
 
@@ -40,6 +47,7 @@ export async function extractValidatedMeetingStructure(
   client: MeetingStructureClient,
   input: {
     metadata: MeetingMetadata;
+    preferences?: ProcessingPreferences;
     transcript: TranscriptSegment[];
   }
 ): Promise<MeetingStructure> {
