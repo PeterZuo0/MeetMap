@@ -48,6 +48,8 @@ dotnet run --project native/windows-audio/src/MeetMap.WindowsAudio.csproj -- `
   --microphone-device 1
 ```
 
+The Electron adapter runs the native process until the user stops recording. For that mode, pass `--wait-for-stdin-stop` and write a line containing `stop` to stdin.
+
 ## Current Limitations
 
 - This is a proof of concept, not the production adapter.

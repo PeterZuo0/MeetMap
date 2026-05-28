@@ -5,6 +5,7 @@ import { createOpenAiTranscriptionClient } from "../src/features/transcription/o
 import { createProductionWorkflowServices } from "../src/features/workflow/productionWorkflowServices.js";
 import { createDemoWorkflowServices } from "../src/features/workflow/postMeetingWorkflow.js";
 import { createDemoAudioCaptureProvider } from "./ipc/demoAudioCaptureProvider.js";
+import { createWindowsAudioCaptureProvider } from "./ipc/windowsAudioCaptureProvider.js";
 import type { RecordingIpcContext } from "./ipc/recordingIpc.js";
 import type { MeetingIpcContext } from "./ipc/meetingIpc.js";
 
@@ -30,6 +31,11 @@ export function resolveMainRuntimeConfig({
     env.MEETMAP_DEMO_MODE === "1" || argv.includes("--meetmap-demo");
 
   if (!demoMode) {
+    const productionRecordingIpc: MainRuntimeConfig["recordingIpc"] = {
+      audioCaptureMode: "production",
+      createAudioCaptureProvider: createWindowsAudioCaptureProvider
+    };
+
     if (shouldConfigureCloudWorkflow(env)) {
       const providerConfig = parseProviderConfig(env);
 
@@ -52,7 +58,7 @@ export function resolveMainRuntimeConfig({
               })
             })
           },
-          recordingIpc: {}
+          recordingIpc: productionRecordingIpc
         };
       }
     }
@@ -60,7 +66,7 @@ export function resolveMainRuntimeConfig({
     return {
       demoMode: false,
       meetingIpc: {},
-      recordingIpc: {}
+      recordingIpc: productionRecordingIpc
     };
   }
 

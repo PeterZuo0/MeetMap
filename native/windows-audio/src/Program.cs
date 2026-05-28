@@ -7,7 +7,8 @@ internal sealed record CaptureOptions(
   string SystemOutputPath,
   string MicrophoneOutputPath,
   TimeSpan Duration,
-  int? MicrophoneDeviceNumber
+  int? MicrophoneDeviceNumber,
+  bool WaitForStdinStop
 );
 
 internal static class Program
@@ -49,6 +50,7 @@ internal static class Program
   private static CaptureOptions ParseOptions(string[] args)
   {
     var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+    var flags = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
     for (var index = 0; index < args.Length; index++)
     {
@@ -56,6 +58,12 @@ internal static class Program
       if (!key.StartsWith("--", StringComparison.Ordinal))
       {
         throw new ArgumentException($"Unexpected positional argument: {key}");
+      }
+
+      if (string.Equals(key, "--wait-for-stdin-stop", StringComparison.OrdinalIgnoreCase))
+      {
+        flags.Add(key);
+        continue;
       }
 
       if (index + 1 >= args.Length || args[index + 1].StartsWith("--", StringComparison.Ordinal))
@@ -79,7 +87,8 @@ internal static class Program
       Path.GetFullPath(systemOutput),
       Path.GetFullPath(microphoneOutput),
       TimeSpan.FromSeconds(durationSeconds),
-      microphoneDeviceNumber
+      microphoneDeviceNumber,
+      flags.Contains("--wait-for-stdin-stop")
     );
   }
 
@@ -104,7 +113,14 @@ internal static class Program
     systemCapture.StartRecording();
     microphoneCapture.StartRecording();
 
-    await Task.Delay(options.Duration);
+    if (options.WaitForStdinStop)
+    {
+      await WaitForStopCommandAsync();
+    }
+    else
+    {
+      await Task.Delay(options.Duration);
+    }
 
     systemCapture.StopRecording();
     microphoneCapture.StopRecording();
@@ -114,6 +130,17 @@ internal static class Program
     microphoneWriter.Flush();
     ValidateWavFile(options.SystemOutputPath, "system");
     ValidateWavFile(options.MicrophoneOutputPath, "microphone");
+  }
+
+  private static async Task WaitForStopCommandAsync()
+  {
+    while (await Console.In.ReadLineAsync() is { } line)
+    {
+      if (string.Equals(line.Trim(), "stop", StringComparison.OrdinalIgnoreCase))
+      {
+        return;
+      }
+    }
   }
 
   private static WaveInEvent CreateMicrophoneCapture(int? deviceNumber)
@@ -198,6 +225,7 @@ internal static class Program
       Optional:
         --duration-seconds <number>  Capture duration, defaults to 10
         --microphone-device <index>  NAudio WaveIn device index, defaults to 0
+        --wait-for-stdin-stop        Record until a "stop" line is received on stdin
         --help                       Show this help
       """;
   }
