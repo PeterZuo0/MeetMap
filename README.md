@@ -50,6 +50,12 @@ $env:OPENAI_API_KEY = "..."
 pnpm dev
 ```
 
+For local testing, you can also create a `.env` file in the repository root. `.env` is ignored by git:
+
+```text
+OPENAI_API_KEY=...
+```
+
 Run the desktop app with explicit demo providers:
 
 ```powershell

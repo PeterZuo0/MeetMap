@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { createMeetingStore } from "../src/features/meetings/meetingStore.js";
 import { registerMeetingIpc } from "./ipc/meetingIpc.js";
 import { registerRecordingIpc } from "./ipc/recordingIpc.js";
+import { loadDotEnvFile } from "./envFile.js";
 import { resolveMainRuntimeConfig } from "./mainConfig.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -36,7 +37,12 @@ function createMainWindow() {
   void window.loadFile(path.join(__dirname, "../../dist/index.html"));
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  await loadDotEnvFile({
+    filePath: path.join(process.cwd(), ".env"),
+    env: process.env
+  });
+
   const runtimeConfig = resolveMainRuntimeConfig({
     env: process.env,
     argv: process.argv
