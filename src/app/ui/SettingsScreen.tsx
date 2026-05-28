@@ -30,6 +30,29 @@ const SETTINGS_SECTIONS: Array<{
   { id: "privacy", title: "Privacy & storage", icon: "settings" }
 ];
 
+type SettingsControlKey =
+  | "autoDeleteCloudCopies"
+  | "autoGain"
+  | "cantonese"
+  | "englishGB"
+  | "englishUS"
+  | "exportMapView"
+  | "includeTimestamps"
+  | "includeTranscriptAppendix"
+  | "keepIntermediateArtifacts"
+  | "mandarin"
+  | "minimizeToTray"
+  | "mixedCodeSwitching"
+  | "noiseSuppression"
+  | "openAfterExport"
+  | "openAtStartup"
+  | "preserveTranscriptLanguage"
+  | "speakerDiarization"
+  | "standaloneExport"
+  | "uploadRecordedAudio"
+  | "uploadSeparateTracks"
+  | "useOutputLanguage";
+
 export function SettingsScreen({
   settings,
   initialSection = "general",
@@ -41,6 +64,8 @@ export function SettingsScreen({
 }) {
   const lang = settings.uiLanguage;
   const [section, setSection] = useState<SettingsSectionId>(initialSection);
+  const updateControl = <Key extends SettingsControlKey>(key: Key, value: AppSettings[Key]) =>
+    onChange({ ...settings, [key]: value });
 
   return (
     <section className="pane settings-pane" aria-label="Settings">
@@ -61,13 +86,17 @@ export function SettingsScreen({
         </nav>
 
         <div className="settings-content">
-          {section === "general" && <GeneralSettings settings={settings} onChange={onChange} lang={lang} />}
-          {section === "audio" && <AudioSettings />}
-          {section === "language" && <LanguageSettings settings={settings} onChange={onChange} />}
-          {section === "transcription" && <TranscriptionSettings />}
-          {section === "export" && <ExportSettings />}
+          {section === "general" && (
+            <GeneralSettings lang={lang} onChange={onChange} onControlChange={updateControl} settings={settings} />
+          )}
+          {section === "audio" && <AudioSettings onControlChange={updateControl} settings={settings} />}
+          {section === "language" && (
+            <LanguageSettings onChange={onChange} onControlChange={updateControl} settings={settings} />
+          )}
+          {section === "transcription" && <TranscriptionSettings onControlChange={updateControl} settings={settings} />}
+          {section === "export" && <ExportSettings onControlChange={updateControl} settings={settings} />}
           {section === "api" && <ApiSettings />}
-          {section === "privacy" && <PrivacySettings />}
+          {section === "privacy" && <PrivacySettings onControlChange={updateControl} settings={settings} />}
         </div>
       </div>
     </section>
@@ -77,10 +106,12 @@ export function SettingsScreen({
 function GeneralSettings({
   settings,
   onChange,
+  onControlChange,
   lang
 }: {
   settings: AppSettings;
   onChange(settings: AppSettings): void;
+  onControlChange<Key extends SettingsControlKey>(key: Key, value: AppSettings[Key]): void;
   lang: UiLanguage;
 }) {
   return (
@@ -151,10 +182,18 @@ function GeneralSettings({
 
       <SettingsBlock title="Startup">
         <SettingsRow labelText="Open at Windows startup">
-          <Toggle checked />
+          <Toggle
+            checked={settings.openAtStartup}
+            labelText="Open at Windows startup"
+            onChange={(checked) => onControlChange("openAtStartup", checked)}
+          />
         </SettingsRow>
         <SettingsRow labelText="Minimize to tray on close">
-          <Toggle checked />
+          <Toggle
+            checked={settings.minimizeToTray}
+            labelText="Minimize to tray on close"
+            onChange={(checked) => onControlChange("minimizeToTray", checked)}
+          />
         </SettingsRow>
       </SettingsBlock>
 
@@ -167,7 +206,13 @@ function GeneralSettings({
   );
 }
 
-function AudioSettings() {
+function AudioSettings({
+  settings,
+  onControlChange
+}: {
+  settings: AppSettings;
+  onControlChange<Key extends SettingsControlKey>(key: Key, value: AppSettings[Key]): void;
+}) {
   return (
     <>
       <SettingsHeader title="Audio devices" description="Windows capture preferences for the MVP recorder." />
@@ -187,10 +232,18 @@ function AudioSettings() {
           <ValueText>Default communications device</ValueText>
         </SettingsRow>
         <SettingsRow labelText="Noise suppression">
-          <Toggle checked />
+          <Toggle
+            checked={settings.noiseSuppression}
+            labelText="Noise suppression"
+            onChange={(checked) => onControlChange("noiseSuppression", checked)}
+          />
         </SettingsRow>
         <SettingsRow labelText="Auto-gain control">
-          <Toggle />
+          <Toggle
+            checked={settings.autoGain}
+            labelText="Auto-gain control"
+            onChange={(checked) => onControlChange("autoGain", checked)}
+          />
         </SettingsRow>
         <SettingsRow labelText="Voice activity detection">
           <ValueText>Keep active speech, drop silence under threshold</ValueText>
@@ -202,10 +255,12 @@ function AudioSettings() {
 
 function LanguageSettings({
   settings,
-  onChange
+  onChange,
+  onControlChange
 }: {
   settings: AppSettings;
   onChange(settings: AppSettings): void;
+  onControlChange<Key extends SettingsControlKey>(key: Key, value: AppSettings[Key]): void;
 }) {
   return (
     <>
@@ -229,19 +284,39 @@ function LanguageSettings({
         description="Help the model by narrowing likely speech languages for code-switching meetings."
       >
         <SettingsRow labelText="Mandarin Chinese (zh-CN)">
-          <Toggle checked />
+          <Toggle
+            checked={settings.mandarin}
+            labelText="Mandarin Chinese (zh-CN)"
+            onChange={(checked) => onControlChange("mandarin", checked)}
+          />
         </SettingsRow>
         <SettingsRow labelText="Cantonese (zh-HK)">
-          <Toggle />
+          <Toggle
+            checked={settings.cantonese}
+            labelText="Cantonese (zh-HK)"
+            onChange={(checked) => onControlChange("cantonese", checked)}
+          />
         </SettingsRow>
         <SettingsRow labelText="English (en-US)">
-          <Toggle checked />
+          <Toggle
+            checked={settings.englishUS}
+            labelText="English (en-US)"
+            onChange={(checked) => onControlChange("englishUS", checked)}
+          />
         </SettingsRow>
         <SettingsRow labelText="English (en-GB)">
-          <Toggle />
+          <Toggle
+            checked={settings.englishGB}
+            labelText="English (en-GB)"
+            onChange={(checked) => onControlChange("englishGB", checked)}
+          />
         </SettingsRow>
         <SettingsRow labelText="Mixed code-switching">
-          <Toggle checked />
+          <Toggle
+            checked={settings.mixedCodeSwitching}
+            labelText="Mixed code-switching"
+            onChange={(checked) => onControlChange("mixedCodeSwitching", checked)}
+          />
         </SettingsRow>
       </SettingsBlock>
       <SettingsBlock
@@ -255,7 +330,13 @@ function LanguageSettings({
   );
 }
 
-function TranscriptionSettings() {
+function TranscriptionSettings({
+  settings,
+  onControlChange
+}: {
+  settings: AppSettings;
+  onControlChange<Key extends SettingsControlKey>(key: Key, value: AppSettings[Key]): void;
+}) {
   return (
     <>
       <SettingsHeader title="Transcription & summary" description="Cloud processing defaults used after a meeting ends." />
@@ -267,10 +348,18 @@ function TranscriptionSettings() {
           <ValueText>gpt-4o transcribe</ValueText>
         </SettingsRow>
         <SettingsRow labelText="Speaker diarization">
-          <Toggle checked />
+          <Toggle
+            checked={settings.speakerDiarization}
+            labelText="Speaker diarization"
+            onChange={(checked) => onControlChange("speakerDiarization", checked)}
+          />
         </SettingsRow>
         <SettingsRow labelText="Preserve transcript language">
-          <Toggle checked />
+          <Toggle
+            checked={settings.preserveTranscriptLanguage}
+            labelText="Preserve transcript language"
+            onChange={(checked) => onControlChange("preserveTranscriptLanguage", checked)}
+          />
         </SettingsRow>
       </SettingsBlock>
       <SettingsBlock title="Summary">
@@ -281,14 +370,24 @@ function TranscriptionSettings() {
           <ValueText>Decisions, action items, risks, and topic map</ValueText>
         </SettingsRow>
         <SettingsRow labelText="Use output language setting">
-          <Toggle checked />
+          <Toggle
+            checked={settings.useOutputLanguage}
+            labelText="Use output language setting"
+            onChange={(checked) => onControlChange("useOutputLanguage", checked)}
+          />
         </SettingsRow>
       </SettingsBlock>
     </>
   );
 }
 
-function ExportSettings() {
+function ExportSettings({
+  settings,
+  onControlChange
+}: {
+  settings: AppSettings;
+  onControlChange<Key extends SettingsControlKey>(key: Key, value: AppSettings[Key]): void;
+}) {
   return (
     <>
       <SettingsHeader title="Export defaults" description="Generated documents share the same structured meeting JSON." />
@@ -297,21 +396,45 @@ function ExportSettings() {
           <ValueText>MeetMap executive summary</ValueText>
         </SettingsRow>
         <SettingsRow labelText="Include transcript appendix">
-          <Toggle checked />
+          <Toggle
+            checked={settings.includeTranscriptAppendix}
+            labelText="Include transcript appendix"
+            onChange={(checked) => onControlChange("includeTranscriptAppendix", checked)}
+          />
         </SettingsRow>
         <SettingsRow labelText="Include timestamps">
-          <Toggle checked />
+          <Toggle
+            checked={settings.includeTimestamps}
+            labelText="Include timestamps"
+            onChange={(checked) => onControlChange("includeTimestamps", checked)}
+          />
         </SettingsRow>
       </SettingsBlock>
       <SettingsBlock title="Structure map HTML">
         <SettingsRow labelText="Standalone export">
-          <Toggle checked />
+          <Toggle
+            checked={settings.standaloneExport}
+            labelText="Standalone export"
+            onChange={(checked) => onControlChange("standaloneExport", checked)}
+          />
         </SettingsRow>
         <SettingsRow labelText="Default view">
-          <ValueText>Topic map with linked action items</ValueText>
+          <SegmentedControl
+            onChange={(value) => onControlChange("exportMapView", value as AppSettings["exportMapView"])}
+            options={[
+              { label: "Tree", value: "tree" },
+              { label: "Radial", value: "radial" },
+              { label: "Timeline", value: "timeline" }
+            ]}
+            value={settings.exportMapView}
+          />
         </SettingsRow>
         <SettingsRow labelText="Open after export">
-          <Toggle />
+          <Toggle
+            checked={settings.openAfterExport}
+            labelText="Open after export"
+            onChange={(checked) => onControlChange("openAfterExport", checked)}
+          />
         </SettingsRow>
       </SettingsBlock>
     </>
@@ -337,19 +460,37 @@ function ApiSettings() {
   );
 }
 
-function PrivacySettings() {
+function PrivacySettings({
+  settings,
+  onControlChange
+}: {
+  settings: AppSettings;
+  onControlChange<Key extends SettingsControlKey>(key: Key, value: AppSettings[Key]): void;
+}) {
   return (
     <>
       <SettingsHeader title="Privacy & storage" description="Controls for local meeting files and cloud processing consent." />
       <SettingsBlock title="What gets uploaded">
         <SettingsRow labelText="Upload recorded audio after meeting ends">
-          <Toggle checked />
+          <Toggle
+            checked={settings.uploadRecordedAudio}
+            labelText="Upload recorded audio after meeting ends"
+            onChange={(checked) => onControlChange("uploadRecordedAudio", checked)}
+          />
         </SettingsRow>
         <SettingsRow labelText="Upload microphone and system tracks separately">
-          <Toggle checked />
+          <Toggle
+            checked={settings.uploadSeparateTracks}
+            labelText="Upload microphone and system tracks separately"
+            onChange={(checked) => onControlChange("uploadSeparateTracks", checked)}
+          />
         </SettingsRow>
         <SettingsRow labelText="Auto-delete cloud processing copies">
-          <Toggle checked />
+          <Toggle
+            checked={settings.autoDeleteCloudCopies}
+            labelText="Auto-delete cloud processing copies"
+            onChange={(checked) => onControlChange("autoDeleteCloudCopies", checked)}
+          />
         </SettingsRow>
       </SettingsBlock>
       <SettingsBlock title="Local storage">
@@ -357,7 +498,11 @@ function PrivacySettings() {
           <ValueText>meetings/{`{meetingId}`}/audio</ValueText>
         </SettingsRow>
         <SettingsRow labelText="Keep intermediate artifacts">
-          <Toggle checked />
+          <Toggle
+            checked={settings.keepIntermediateArtifacts}
+            labelText="Keep intermediate artifacts"
+            onChange={(checked) => onControlChange("keepIntermediateArtifacts", checked)}
+          />
         </SettingsRow>
         <SettingsRow labelText="Auto-archive after">
           <ValueText>90 days</ValueText>
@@ -419,11 +564,26 @@ function KeyRow({ labelText, value }: { labelText: string; value: string }) {
   );
 }
 
-function Toggle({ checked = false }: { checked?: boolean }) {
+function Toggle({
+  checked = false,
+  labelText,
+  onChange
+}: {
+  checked?: boolean;
+  labelText: string;
+  onChange(checked: boolean): void;
+}) {
   return (
-    <span className={`toggle ${checked ? "checked" : ""}`} aria-hidden="true">
+    <button
+      aria-checked={checked}
+      aria-label={labelText}
+      className={`toggle ${checked ? "checked" : ""}`}
+      onClick={() => onChange(!checked)}
+      role="switch"
+      type="button"
+    >
       <span />
-    </span>
+    </button>
   );
 }
 
@@ -456,6 +616,7 @@ function SegmentedControl({
     <div className="segmented-control">
       {options.map((option) => (
         <button
+          aria-pressed={option.value === value}
           className={option.value === value ? "active" : ""}
           key={option.value}
           onClick={() => onChange(option.value)}
