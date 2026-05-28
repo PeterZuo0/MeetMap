@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { decideVoiceActivity } from "../audio-analysis/voiceActivity";
 import type { MeetingStructure } from "../intelligence/meetingStructure";
 import type { PostMeetingWorkflowServices } from "./postMeetingWorkflow";
-import { runProductionSmoke } from "./productionSmokeRunner";
+import { parseProductionSmokeArgs, runProductionSmoke } from "./productionSmokeRunner";
 
 async function pathExists(path: string): Promise<boolean> {
   try {
@@ -237,5 +237,65 @@ describe("runProductionSmoke", () => {
       await rm(dataDir, { force: true, recursive: true });
       await rm(inputDir, { force: true, recursive: true });
     }
+  });
+});
+
+describe("parseProductionSmokeArgs", () => {
+  test("maps cloud consent and audio path flags", () => {
+    expect(
+      parseProductionSmokeArgs([
+        "--meeting-id",
+        "manual-smoke",
+        "--title",
+        "Manual smoke",
+        "--data-dir",
+        "C:\\meetings",
+        "--system-audio",
+        "C:\\input\\system.wav",
+        "--microphone-audio",
+        "C:\\input\\microphone.wav",
+        "--output-language",
+        "bilingual",
+        "--allow-cloud-upload"
+      ])
+    ).toEqual({
+      allowCloudUpload: true,
+      dataDir: "C:\\meetings",
+      meetingId: "manual-smoke",
+      microphoneAudioPath: "C:\\input\\microphone.wav",
+      outputLanguage: "bilingual",
+      systemAudioPath: "C:\\input\\system.wav",
+      title: "Manual smoke"
+    });
+  });
+
+  test("leaves cloud consent false when the flag is missing", () => {
+    expect(
+      parseProductionSmokeArgs([
+        "--meeting-id",
+        "manual-smoke",
+        "--title",
+        "Manual smoke",
+        "--data-dir",
+        "C:\\meetings"
+      ])
+    ).toMatchObject({
+      allowCloudUpload: false
+    });
+  });
+
+  test("rejects unsupported output language values", () => {
+    expect(() =>
+      parseProductionSmokeArgs([
+        "--meeting-id",
+        "manual-smoke",
+        "--title",
+        "Manual smoke",
+        "--data-dir",
+        "C:\\meetings",
+        "--output-language",
+        "klingon"
+      ])
+    ).toThrow("Unsupported output language: klingon");
   });
 });

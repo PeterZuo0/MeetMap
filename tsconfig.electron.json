@@ -14,6 +14,6 @@
     "rootDir": ".",
     "types": ["node"]
   },
-  "include": ["electron", "src/features"],
+  "include": ["electron", "src/features", "scripts"],
   "exclude": ["**/*.test.ts"]
 }

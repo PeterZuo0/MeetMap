@@ -13,7 +13,8 @@
     "test": "vitest run --passWithNoTests",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.electron.json --noEmit",
     "lint": "eslint .",
-    "package:win": "pnpm build && dotnet publish native/windows-audio/src/MeetMap.WindowsAudio.csproj -c Release && electron-builder --win --dir"
+    "package:win": "pnpm build && dotnet publish native/windows-audio/src/MeetMap.WindowsAudio.csproj -c Release && electron-builder --win --dir",
+    "smoke:production": "pnpm build && node dist-electron/scripts/productionSmoke.js"
   },
   "build": {
     "appId": "com.meetmap.desktop",

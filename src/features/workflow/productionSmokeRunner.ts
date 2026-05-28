@@ -7,8 +7,10 @@ import type {
   MeetingAudioTracks,
   SummaryStyle
 } from "../meetings/meetingTypes.js";
+import { SUMMARY_STYLE_VALUES } from "../meetings/meetingTypes.js";
 import type { ProcessingPreferences } from "../settings/processingPreferences.js";
 import type { LanguageOptionValue } from "../settings/languageOptions.js";
+import { LANGUAGE_OPTION_VALUES } from "../settings/languageOptions.js";
 import {
   processMeeting,
   type PostMeetingWorkflowServices
@@ -120,6 +122,64 @@ export async function runProductionSmoke(
   };
 }
 
+export function parseProductionSmokeArgs(args: string[]): ProductionSmokeInput {
+  const parsed: Partial<ProductionSmokeInput> = {
+    allowCloudUpload: false,
+    outputLanguage: "auto"
+  };
+
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+
+    switch (arg) {
+      case "--allow-cloud-upload":
+        parsed.allowCloudUpload = true;
+        break;
+      case "--data-dir":
+        parsed.dataDir = readFlagValue(args, index, arg);
+        index += 1;
+        break;
+      case "--meeting-id":
+        parsed.meetingId = readFlagValue(args, index, arg);
+        index += 1;
+        break;
+      case "--microphone-audio":
+        parsed.microphoneAudioPath = readFlagValue(args, index, arg);
+        index += 1;
+        break;
+      case "--output-language":
+        parsed.outputLanguage = parseOutputLanguage(readFlagValue(args, index, arg));
+        index += 1;
+        break;
+      case "--summary-style":
+        parsed.summaryStyle = parseSummaryStyle(readFlagValue(args, index, arg));
+        index += 1;
+        break;
+      case "--system-audio":
+        parsed.systemAudioPath = readFlagValue(args, index, arg);
+        index += 1;
+        break;
+      case "--title":
+        parsed.title = readFlagValue(args, index, arg);
+        index += 1;
+        break;
+      default:
+        throw new Error(`Unknown production smoke argument: ${arg}`);
+    }
+  }
+
+  return {
+    allowCloudUpload: parsed.allowCloudUpload ?? false,
+    dataDir: requireParsedValue(parsed.dataDir, "--data-dir"),
+    meetingId: requireParsedValue(parsed.meetingId, "--meeting-id"),
+    microphoneAudioPath: parsed.microphoneAudioPath,
+    outputLanguage: parsed.outputLanguage ?? "auto",
+    summaryStyle: parsed.summaryStyle,
+    systemAudioPath: parsed.systemAudioPath,
+    title: requireParsedValue(parsed.title, "--title")
+  };
+}
+
 async function copyInputAudioTrack({
   audioTracks,
   destinationPath,
@@ -138,11 +198,53 @@ async function copyInputAudioTrack({
   await copyFile(sourcePath, destinationPath);
   const wavInfo = await readWavFileInfo(destinationPath);
 
-  audioTracks[trackId] = {
-    id: trackId,
-    filePath: destinationPath,
-    format: "wav",
-    hasAudio: wavInfo.durationMs > 0,
-    ...wavInfo
-  };
+  if (trackId === "system") {
+    audioTracks.system = {
+      ...wavInfo,
+      id: "system",
+      filePath: destinationPath,
+      hasAudio: wavInfo.durationMs > 0
+    };
+  } else {
+    audioTracks.microphone = {
+      ...wavInfo,
+      id: "microphone",
+      filePath: destinationPath,
+      hasAudio: wavInfo.durationMs > 0
+    };
+  }
+}
+
+function readFlagValue(args: string[], index: number, flag: string): string {
+  const value = args[index + 1];
+
+  if (!value || value.startsWith("--")) {
+    throw new Error(`Missing value for ${flag}`);
+  }
+
+  return value;
+}
+
+function requireParsedValue<T>(value: T | undefined, flag: string): T {
+  if (value === undefined) {
+    throw new Error(`Missing required argument ${flag}`);
+  }
+
+  return value;
+}
+
+function parseOutputLanguage(value: string): LanguageOptionValue {
+  if ((LANGUAGE_OPTION_VALUES as readonly string[]).includes(value)) {
+    return value as LanguageOptionValue;
+  }
+
+  throw new Error(`Unsupported output language: ${value}`);
+}
+
+function parseSummaryStyle(value: string): SummaryStyle {
+  if ((SUMMARY_STYLE_VALUES as readonly string[]).includes(value)) {
+    return value as SummaryStyle;
+  }
+
+  throw new Error(`Unsupported summary style: ${value}`);
 }
