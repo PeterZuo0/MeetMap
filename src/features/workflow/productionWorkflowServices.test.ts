@@ -164,6 +164,7 @@ describe("createProductionWorkflowServices", () => {
           startedAt: "2026-05-28T00:01:00.000Z",
           endedAt: "2026-05-28T00:11:00.000Z",
           outputLanguage: "bilingual",
+          summaryStyle: "decisions_actions",
           transcript: [segment("system")]
         }
       ]

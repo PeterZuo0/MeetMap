@@ -9,6 +9,7 @@ export type MeetingStructureRequest = {
   startedAt: string;
   endedAt?: string;
   outputLanguage: MeetingMetadata["outputLanguage"];
+  summaryStyle: NonNullable<MeetingMetadata["summaryStyle"]>;
   transcript: TranscriptSegment[];
 };
 
@@ -30,6 +31,7 @@ export function createMeetingStructureRequest({
       metadata.timestamps.recordingStartedAt ?? metadata.timestamps.createdAt,
     endedAt: metadata.timestamps.recordingEndedAt,
     outputLanguage: metadata.outputLanguage,
+    summaryStyle: metadata.summaryStyle ?? "decisions_actions",
     transcript
   };
 }

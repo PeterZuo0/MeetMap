@@ -32,6 +32,15 @@ export type AudioTrackId = (typeof AUDIO_TRACK_ID_VALUES)[number];
 
 export type MeetingId = string;
 
+export const SUMMARY_STYLE_VALUES = [
+  "decisions_actions",
+  "topic_outline",
+  "qa",
+  "highlights"
+] as const;
+
+export type SummaryStyle = (typeof SUMMARY_STYLE_VALUES)[number];
+
 export type MeetingTimestamps = {
   createdAt: string;
   updatedAt: string;
@@ -81,6 +90,7 @@ export type MeetingMetadata = {
   status: MeetingStatus;
   processingStep?: ProcessingStep;
   outputLanguage: LanguageOptionValue;
+  summaryStyle?: SummaryStyle;
   timestamps: MeetingTimestamps;
   audioTracks: MeetingAudioTracks;
   transcriptPath: string | null;

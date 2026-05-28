@@ -1,6 +1,7 @@
 import { writeFile } from "node:fs/promises";
 import type {
   AudioCaptureError,
+  AudioLevelUpdate,
   AudioCaptureProvider,
   AudioCaptureStartRequest,
   AudioCaptureStopResult,
@@ -9,7 +10,9 @@ import type {
 
 export function createDemoAudioCaptureProvider(): AudioCaptureProvider {
   let request: AudioCaptureStartRequest | undefined;
+  let levelTimer: NodeJS.Timeout | undefined;
   const errorSubscribers = new Set<(error: AudioCaptureError) => void>();
+  const levelSubscribers = new Set<(update: AudioLevelUpdate) => void>();
 
   return {
     async listDevices() {
@@ -31,6 +34,7 @@ export function createDemoAudioCaptureProvider(): AudioCaptureProvider {
 
     async start(startRequest) {
       request = startRequest;
+      startLevelTimer();
       await Promise.all(
         Object.values(startRequest.tracks).map(async (track) => {
           if (!track) {
@@ -41,25 +45,43 @@ export function createDemoAudioCaptureProvider(): AudioCaptureProvider {
       );
     },
 
+    async pause() {
+      if (!request) {
+        throw new Error("Demo capture was not started");
+      }
+      stopLevelTimer();
+    },
+
+    async resume() {
+      if (!request) {
+        throw new Error("Demo capture was not started");
+      }
+      startLevelTimer();
+    },
+
     async stop(): Promise<AudioCaptureStopResult> {
       if (!request) {
         throw new Error("Demo capture was not started");
       }
 
+      stopLevelTimer();
+      const stoppedRequest = request;
+      request = undefined;
+
       return {
         tracks: {
-          system: request.tracks.system
+          system: stoppedRequest.tracks.system
             ? {
                 id: "system",
-                filePath: request.tracks.system.filePath,
+                filePath: stoppedRequest.tracks.system.filePath,
                 format: "wav",
                 hasAudio: true
               }
             : undefined,
-          microphone: request.tracks.microphone
+          microphone: stoppedRequest.tracks.microphone
             ? {
                 id: "microphone",
-                filePath: request.tracks.microphone.filePath,
+                filePath: stoppedRequest.tracks.microphone.filePath,
                 format: "wav",
                 hasAudio: true
               }
@@ -68,8 +90,9 @@ export function createDemoAudioCaptureProvider(): AudioCaptureProvider {
       };
     },
 
-    onLevel(): AudioCaptureUnsubscribe {
-      return () => {};
+    onLevel(callback): AudioCaptureUnsubscribe {
+      levelSubscribers.add(callback);
+      return () => levelSubscribers.delete(callback);
     },
 
     onError(callback): AudioCaptureUnsubscribe {
@@ -77,6 +100,38 @@ export function createDemoAudioCaptureProvider(): AudioCaptureProvider {
       return () => errorSubscribers.delete(callback);
     }
   };
+
+  function startLevelTimer(): void {
+    if (!request || levelTimer) {
+      return;
+    }
+
+    levelTimer = setInterval(() => {
+      const occurredAt = new Date().toISOString();
+      if (request?.tracks.system) {
+        emitLevel(levelSubscribers, { track: "system", level: 0.62, occurredAt });
+      }
+      if (request?.tracks.microphone) {
+        emitLevel(levelSubscribers, { track: "microphone", level: 0.34, occurredAt });
+      }
+    }, 500);
+  }
+
+  function stopLevelTimer(): void {
+    if (!levelTimer) {
+      return;
+    }
+
+    clearInterval(levelTimer);
+    levelTimer = undefined;
+  }
+}
+
+function emitLevel(
+  subscribers: Set<(update: AudioLevelUpdate) => void>,
+  update: AudioLevelUpdate
+): void {
+  subscribers.forEach((callback) => callback(update));
 }
 
 function createDemoWavBytes(): Uint8Array {

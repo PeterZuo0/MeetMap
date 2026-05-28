@@ -13,6 +13,7 @@ const request: MeetingStructureRequest = {
   startedAt: "2026-05-28T00:01:00.000Z",
   endedAt: "2026-05-28T00:11:00.000Z",
   outputLanguage: "bilingual",
+  summaryStyle: "highlights",
   transcript: [
     {
       id: "seg-1",
@@ -83,6 +84,8 @@ describe("createOpenAiMeetingStructureClient", () => {
       }
     });
     expect(calls[0][0].instructions).toContain("bilingual");
+    expect(calls[0][0].instructions).toContain("highlights first");
+    expect(calls[0][0].input).toContain('"summaryStyle":"highlights"');
     expect(calls[0][0].input).toContain('"id":"seg-1"');
     expect(calls[0][0].input).toContain("We decided to keep the export workflow in scope.");
   });

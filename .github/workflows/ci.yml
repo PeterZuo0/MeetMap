@@ -29,8 +29,19 @@ jobs:
           node-version: 22
           cache: pnpm
 
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Build native Windows audio helper
+        run: dotnet build native/windows-audio/src/MeetMap.WindowsAudio.csproj
+
+      - name: Publish native Windows audio helper
+        run: dotnet publish native/windows-audio/src/MeetMap.WindowsAudio.csproj -c Release
 
       - name: Test
         run: pnpm test
@@ -64,8 +75,19 @@ jobs:
           node-version: 22
           cache: pnpm
 
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Build native Windows audio helper
+        run: dotnet build native/windows-audio/src/MeetMap.WindowsAudio.csproj
+
+      - name: Publish native Windows audio helper
+        run: dotnet publish native/windows-audio/src/MeetMap.WindowsAudio.csproj -c Release
 
       - name: Package Windows directory
         run: pnpm package:win

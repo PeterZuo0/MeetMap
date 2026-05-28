@@ -30,12 +30,21 @@ function startRequest(): AudioCaptureStartRequest {
   };
 }
 
+function systemOnlyRequest(): AudioCaptureStartRequest {
+  return {
+    meetingId: "meeting-1",
+    tracks: {
+      system: { filePath: "C:/meetings/1/audio/system.wav" }
+    }
+  };
+}
+
 describe("createWindowsAudioCaptureProvider", () => {
   test("starts native capture and returns WAV metadata when stopped", async () => {
     const child = new FakeChildProcess();
     const spawnCalls: Parameters<WindowsAudioCaptureSpawn>[] = [];
     const provider = createWindowsAudioCaptureProvider({
-      projectPath: "C:/repo/native/windows-audio/src/MeetMap.WindowsAudio.csproj",
+      helperPath: "C:/repo/native/windows-audio/src/MeetMap.WindowsAudio.csproj",
       spawn(command, args, options) {
         spawnCalls.push([command, args, options]);
         return child;
@@ -52,6 +61,8 @@ describe("createWindowsAudioCaptureProvider", () => {
     });
 
     await provider.start(startRequest());
+    await provider.pause();
+    await provider.resume();
     const stop = provider.stop();
     child.emit("exit", 0, null);
 
@@ -84,23 +95,23 @@ describe("createWindowsAudioCaptureProvider", () => {
           "--project",
           "C:/repo/native/windows-audio/src/MeetMap.WindowsAudio.csproj",
           "--",
+          "--wait-for-stdin-stop",
           "--system-output",
           "C:/meetings/1/audio/system.wav",
           "--microphone-output",
-          "C:/meetings/1/audio/microphone.wav",
-          "--wait-for-stdin-stop"
+          "C:/meetings/1/audio/microphone.wav"
         ],
         { windowsHide: true }
       ]
     ]);
-    expect(child.stdinWrites).toEqual(["stop\n"]);
+    expect(child.stdinWrites).toEqual(["pause\n", "resume\n", "stop\n"]);
   });
 
   test("emits provider errors when native capture exits before stop", async () => {
     const child = new FakeChildProcess();
     const errors: Error[] = [];
     const provider = createWindowsAudioCaptureProvider({
-      projectPath: "native.csproj",
+      helperPath: "native.csproj",
       spawn() {
         return child;
       },
@@ -115,5 +126,77 @@ describe("createWindowsAudioCaptureProvider", () => {
     child.emit("exit", 3, null);
 
     expect(errors[0].message).toContain("No microphone capture devices are available.");
+  });
+
+  test("starts native capture with only the requested track", async () => {
+    const child = new FakeChildProcess();
+    const spawnCalls: Parameters<WindowsAudioCaptureSpawn>[] = [];
+    const statCalls: string[] = [];
+    const provider = createWindowsAudioCaptureProvider({
+      helperPath: "native.csproj",
+      spawn(command, args, options) {
+        spawnCalls.push([command, args, options]);
+        return child;
+      },
+      async stat(filePath) {
+        statCalls.push(filePath);
+        return { size: 44 };
+      }
+    });
+
+    await provider.start(systemOnlyRequest());
+    const stop = provider.stop();
+    child.emit("exit", 0, null);
+
+    await expect(stop).resolves.toEqual({
+      tracks: {
+        system: {
+          id: "system",
+          filePath: "C:/meetings/1/audio/system.wav",
+          format: "wav",
+          hasAudio: false,
+          durationMs: expect.any(Number),
+          byteLength: 44
+        },
+        microphone: undefined
+      }
+    });
+    expect(spawnCalls[0][1]).toEqual([
+      "run",
+      "--project",
+      "native.csproj",
+      "--",
+      "--wait-for-stdin-stop",
+      "--system-output",
+      "C:/meetings/1/audio/system.wav"
+    ]);
+    expect(statCalls).toEqual(["C:/meetings/1/audio/system.wav"]);
+  });
+
+  test("starts published helper directly when an exe path is configured", async () => {
+    const child = new FakeChildProcess();
+    const spawnCalls: Parameters<WindowsAudioCaptureSpawn>[] = [];
+    const provider = createWindowsAudioCaptureProvider({
+      helperPath: "C:/Program Files/MeetMap/resources/native/windows-audio/meetmap-windows-audio.exe",
+      spawn(command, args, options) {
+        spawnCalls.push([command, args, options]);
+        return child;
+      },
+      async stat() {
+        return { size: 44 };
+      }
+    });
+
+    await provider.start(systemOnlyRequest());
+
+    expect(spawnCalls[0]).toEqual([
+      "C:/Program Files/MeetMap/resources/native/windows-audio/meetmap-windows-audio.exe",
+      [
+        "--wait-for-stdin-stop",
+        "--system-output",
+        "C:/meetings/1/audio/system.wav"
+      ],
+      { windowsHide: true }
+    ]);
   });
 });

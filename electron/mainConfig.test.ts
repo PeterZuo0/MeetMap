@@ -1,5 +1,8 @@
 import { expect, test } from "vitest";
-import { resolveMainRuntimeConfig } from "./mainConfig";
+import {
+  resolveMainRuntimeConfig,
+  resolveNativeAudioHelperPath
+} from "./mainConfig";
 
 test("uses production providers unless demo mode is explicitly enabled", () => {
   const config = resolveMainRuntimeConfig({
@@ -52,4 +55,24 @@ test("enables demo providers with an explicit command-line flag", () => {
   expect(config.demoMode).toBe(true);
   expect(config.meetingIpc.workflowMode).toBe("demo");
   expect(config.recordingIpc.audioCaptureMode).toBe("demo");
+});
+
+test("resolves native audio project from app path in development", () => {
+  expect(
+    resolveNativeAudioHelperPath({
+      appPath: "C:/repo/MeetMap",
+      resourcesPath: "C:/repo/MeetMap/resources",
+      isPackaged: false
+    })
+  ).toBe("C:\\repo\\MeetMap\\native\\windows-audio\\src\\MeetMap.WindowsAudio.csproj");
+});
+
+test("resolves native audio project from resources in packaged app", () => {
+  expect(
+    resolveNativeAudioHelperPath({
+      appPath: "C:/Program Files/MeetMap/resources/app.asar",
+      resourcesPath: "C:/Program Files/MeetMap/resources",
+      isPackaged: true
+    })
+  ).toBe("C:\\Program Files\\MeetMap\\resources\\native\\windows-audio\\meetmap-windows-audio.exe");
 });

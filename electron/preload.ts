@@ -2,7 +2,7 @@ import { contextBridge, ipcRenderer } from "electron";
 
 contextBridge.exposeInMainWorld("meetMap", {
   platform: process.platform,
-  createMeeting: (input: { title: string; outputLanguage: string }) =>
+  createMeeting: (input: { title: string; outputLanguage: string; summaryStyle?: string }) =>
     ipcRenderer.invoke("meeting:create", input),
   startRecording: (
     meetingId: string,
@@ -11,8 +11,15 @@ contextBridge.exposeInMainWorld("meetMap", {
       deviceIds?: { system?: string; microphone?: string };
     }
   ) => ipcRenderer.invoke("recording:start", meetingId, options),
+  pauseRecording: () => ipcRenderer.invoke("recording:pause"),
+  resumeRecording: () => ipcRenderer.invoke("recording:resume"),
   stopRecording: () => ipcRenderer.invoke("recording:stop"),
   listAudioDevices: () => ipcRenderer.invoke("recording:list-devices"),
+  onAudioLevel: (callback: (update: unknown) => void) => {
+    const listener = (_event: unknown, update: unknown) => callback(update);
+    ipcRenderer.on("recording:level", listener);
+    return () => ipcRenderer.off("recording:level", listener);
+  },
   processMeeting: (meetingId: string) =>
     ipcRenderer.invoke("meeting:process", meetingId),
   openExport: (input: { meetingId: string; kind: "word" | "html" }) =>

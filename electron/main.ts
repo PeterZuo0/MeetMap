@@ -45,7 +45,10 @@ app.whenReady().then(async () => {
 
   const runtimeConfig = resolveMainRuntimeConfig({
     env: process.env,
-    argv: process.argv
+    argv: process.argv,
+    appPath: app.getAppPath(),
+    resourcesPath: process.resourcesPath,
+    isPackaged: app.isPackaged
   });
 
   if (runtimeConfig.demoMode) {

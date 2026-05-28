@@ -114,7 +114,10 @@ function createSuccessfulStopProvider(): AudioCaptureProvider {
   };
 }
 
-function createCapturingProvider(requests: AudioCaptureStartRequest[]): AudioCaptureProvider {
+function createCapturingProvider(
+  requests: AudioCaptureStartRequest[],
+  commands: string[] = []
+): AudioCaptureProvider {
   return {
     async listDevices() {
       return [];
@@ -124,6 +127,12 @@ function createCapturingProvider(requests: AudioCaptureStartRequest[]): AudioCap
     },
     async stop() {
       return { tracks: {} };
+    },
+    async pause() {
+      commands.push("pause");
+    },
+    async resume() {
+      commands.push("resume");
     },
     onLevel() {
       return () => {};
@@ -191,6 +200,34 @@ test("lists audio devices from the configured capture provider", async () => {
       { id: "speaker-1", label: "Speakers", track: "system" },
       { id: "mic-1", label: "Microphone", track: "microphone" }
     ]);
+  } finally {
+    await rm(baseDirectory, { force: true, recursive: true });
+  }
+});
+
+test("pauses and resumes the active recording session", async () => {
+  const baseDirectory = await mkdtemp(join(tmpdir(), "meetmap-recording-ipc-"));
+
+  try {
+    const requests: AudioCaptureStartRequest[] = [];
+    const commands: string[] = [];
+    const store = createMeetingStore(baseDirectory);
+    const meeting = await store.createMeeting({
+      id: "recording-pause",
+      title: "Recording Pause",
+      outputLanguage: "en"
+    });
+
+    registerRecordingIpc({
+      store,
+      createAudioCaptureProvider: () => createCapturingProvider(requests, commands)
+    } as RecordingIpcContext);
+
+    await getHandler("recording:start")(null, meeting.id as never);
+    await getHandler("recording:pause")(null);
+    await getHandler("recording:resume")(null);
+
+    expect(commands).toEqual(["pause", "resume"]);
   } finally {
     await rm(baseDirectory, { force: true, recursive: true });
   }

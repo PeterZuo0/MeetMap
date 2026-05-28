@@ -14,6 +14,7 @@ const metadata: MeetingMetadata = {
   title: "Roadmap review",
   status: "recorded",
   outputLanguage: "bilingual",
+  summaryStyle: "topic_outline",
   timestamps: {
     createdAt: "2026-05-28T00:00:00.000Z",
     updatedAt: "2026-05-28T00:00:00.000Z",
@@ -78,6 +79,7 @@ describe("createMeetingStructureRequest", () => {
       startedAt: "2026-05-28T00:01:00.000Z",
       endedAt: "2026-05-28T00:11:00.000Z",
       outputLanguage: "bilingual",
+      summaryStyle: "topic_outline",
       transcript
     });
   });

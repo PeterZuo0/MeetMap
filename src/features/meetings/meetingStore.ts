@@ -13,6 +13,7 @@ export type CreateMeetingInput = {
   id?: MeetingId;
   title: string;
   outputLanguage: MeetingMetadata["outputLanguage"];
+  summaryStyle?: MeetingMetadata["summaryStyle"];
 };
 
 export type MeetingStore = {
@@ -85,6 +86,7 @@ export function createMeetingStore(baseDirectory: string): MeetingStore {
       title: input.title,
       status: "setup",
       outputLanguage: input.outputLanguage,
+      summaryStyle: input.summaryStyle ?? "decisions_actions",
       timestamps: {
         createdAt,
         updatedAt: createdAt

@@ -3,7 +3,7 @@ import type { UiLanguage, WorkflowPhase } from "../meetMapApi";
 import { label, text } from "./copy";
 import { Icon } from "./icons";
 
-type NavTarget = "library" | "pre" | "settings";
+type NavTarget = "library" | "pre" | "recording" | "settings";
 
 export function MeetMapShell({
   current,
@@ -66,7 +66,7 @@ function Sidebar({
           MeetMap<span className="zh">会图</span>
         </div>
       </div>
-      <button className="sb-record-btn" onClick={() => onNav(recording ? "pre" : "pre")}>
+      <button className="sb-record-btn" onClick={() => onNav(recording ? "recording" : "pre")}>
         {recording ? (
           <>
             <span className="record-dot" /> {label(lang, "Recording", "录制中")}

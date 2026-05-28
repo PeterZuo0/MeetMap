@@ -13,7 +13,7 @@
     "test": "vitest run --passWithNoTests",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.electron.json --noEmit",
     "lint": "eslint .",
-    "package:win": "pnpm build && electron-builder --win --dir"
+    "package:win": "pnpm build && dotnet publish native/windows-audio/src/MeetMap.WindowsAudio.csproj -c Release && electron-builder --win --dir"
   },
   "build": {
     "appId": "com.meetmap.desktop",
@@ -25,6 +25,15 @@
       "dist/**/*",
       "dist-electron/**/*",
       "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "native/windows-audio/src/bin/Release/net8.0-windows/win-x64/publish",
+        "to": "native/windows-audio",
+        "filter": [
+          "meetmap-windows-audio.exe"
+        ]
+      }
     ],
     "win": {
       "signAndEditExecutable": false,

@@ -6,6 +6,9 @@
     <Nullable>enable</Nullable>
     <AssemblyName>meetmap-windows-audio</AssemblyName>
     <RootNamespace>MeetMap.WindowsAudio</RootNamespace>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
   </PropertyGroup>
 
   <ItemGroup>

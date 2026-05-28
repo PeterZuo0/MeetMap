@@ -11,6 +11,8 @@ import {
 class FakeAudioCaptureProvider implements AudioCaptureProvider {
   readonly startedRequests: AudioCaptureStartRequest[] = [];
   stopCalls = 0;
+  pauseCalls = 0;
+  resumeCalls = 0;
   private readonly errorCallbacks = new Set<Parameters<AudioCaptureProvider["onError"]>[0]>();
   stopResult: AudioCaptureStopResult = {
     tracks: {
@@ -43,6 +45,14 @@ class FakeAudioCaptureProvider implements AudioCaptureProvider {
   async stop() {
     this.stopCalls += 1;
     return this.stopResult;
+  }
+
+  async pause() {
+    this.pauseCalls += 1;
+  }
+
+  async resume() {
+    this.resumeCalls += 1;
   }
 
   onLevel() {
@@ -137,6 +147,29 @@ test("moves from recording to stopped and then processing-ready after provider s
     meetingId: "meeting-123",
     tracks: provider.stopResult.tracks
   });
+});
+
+test("pauses and resumes through the provider", async () => {
+  const provider = new FakeAudioCaptureProvider();
+  const observedStates: RecordingSessionState["status"][] = [];
+  const session = createRecordingSession({
+    provider,
+    onStateChange: (state) => observedStates.push(state.status)
+  });
+
+  await session.start({
+    meetingId: "meeting-123",
+    tracks: {
+      system: { filePath: "meetings/meeting-123/audio/system.wav" },
+      microphone: { filePath: "meetings/meeting-123/audio/microphone.wav" }
+    }
+  });
+  await session.pause();
+  await session.resume();
+
+  expect(provider.pauseCalls).toBe(1);
+  expect(provider.resumeCalls).toBe(1);
+  expect(observedStates).toEqual(["recording", "paused", "recording"]);
 });
 
 test("rejects illegal recording transitions", async () => {
