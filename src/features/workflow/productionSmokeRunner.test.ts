@@ -284,6 +284,29 @@ describe("parseProductionSmokeArgs", () => {
     });
   });
 
+  test("ignores the pnpm argument separator when forwarded to the script", () => {
+    expect(
+      parseProductionSmokeArgs([
+        "--",
+        "--meeting-id",
+        "manual-smoke",
+        "--title",
+        "Manual smoke",
+        "--data-dir",
+        "C:\\meetings",
+        "--microphone-audio",
+        "C:\\input\\microphone.wav",
+        "--allow-cloud-upload"
+      ])
+    ).toMatchObject({
+      allowCloudUpload: true,
+      dataDir: "C:\\meetings",
+      meetingId: "manual-smoke",
+      microphoneAudioPath: "C:\\input\\microphone.wav",
+      title: "Manual smoke"
+    });
+  });
+
   test("rejects unsupported output language values", () => {
     expect(() =>
       parseProductionSmokeArgs([

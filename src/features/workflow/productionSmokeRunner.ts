@@ -141,6 +141,8 @@ export function parseProductionSmokeArgs(args: string[]): ProductionSmokeInput {
     const arg = args[index];
 
     switch (arg) {
+      case "--":
+        break;
       case "--allow-cloud-upload":
         parsed.allowCloudUpload = true;
         break;
