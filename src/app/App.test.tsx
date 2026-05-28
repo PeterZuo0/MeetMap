@@ -332,6 +332,62 @@ test("opens HTML exports from the export dialog format card", async () => {
   expect(api.openExport).toHaveBeenCalledWith({ meetingId: "meeting-1", kind: "html" });
 });
 
+test("supports transcript search and track filtering in meeting detail", async () => {
+  installApi();
+  render(<App />);
+
+  fireEvent.click(screen.getAllByRole("button", { name: /New recording/ })[0]);
+  fireEvent.change(screen.getByLabelText(/Meeting title/), {
+    target: { value: "Roadmap review" }
+  });
+  fireEvent.click(screen.getByRole("button", { name: /Start recording/ }));
+  await screen.findByRole("heading", { name: /Roadmap review/ });
+  fireEvent.click(screen.getByRole("button", { name: /Stop.*process/ }));
+  expect(await screen.findByRole("heading", { name: "Meeting detail" })).toBeInTheDocument();
+
+  fireEvent.change(screen.getByLabelText(/Search transcript/), {
+    target: { value: "Maya" }
+  });
+
+  expect(screen.getByText("1 / 5")).toBeInTheDocument();
+  expect(screen.getByText(/Maya owns the export pipeline/)).toBeInTheDocument();
+  expect(screen.queryByText(/feedback widget read-only/)).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: /^Mic/ }));
+
+  expect(screen.getByText("0 / 5")).toBeInTheDocument();
+  expect(screen.getByText(/No transcript turns match/)).toBeInTheDocument();
+});
+
+test("supports meeting detail summary, map export, share, and audio controls", async () => {
+  const api = installApi();
+  render(<App />);
+
+  fireEvent.click(screen.getAllByRole("button", { name: /New recording/ })[0]);
+  fireEvent.change(screen.getByLabelText(/Meeting title/), {
+    target: { value: "Roadmap review" }
+  });
+  fireEvent.click(screen.getByRole("button", { name: /Start recording/ }));
+  await screen.findByRole("heading", { name: /Roadmap review/ });
+  fireEvent.click(screen.getByRole("button", { name: /Stop.*process/ }));
+  expect(await screen.findByRole("heading", { name: "Meeting detail" })).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: /Share meeting/ }));
+  expect(screen.getByText(/Share link copied/)).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: /Play recording/ }));
+  expect(screen.getByRole("button", { name: /Pause recording/ })).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: /^Summary/ }));
+  fireEvent.click(screen.getByRole("button", { name: /Regenerate/ }));
+  expect(screen.getByText(/Regenerated from structured meeting data/)).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: /Structure map/ }));
+  fireEvent.click(screen.getByRole("button", { name: /Open as HTML/ }));
+
+  expect(api.openExport).toHaveBeenCalledWith({ meetingId: "meeting-1", kind: "html" });
+});
+
 test("shows no-audio result without export actions", async () => {
   installApi({
     processMeeting: vi.fn(async () =>
