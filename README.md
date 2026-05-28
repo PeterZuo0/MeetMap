@@ -43,6 +43,19 @@ Run the desktop app in normal MVP mode:
 pnpm dev
 ```
 
+Normal MVP mode uses the Windows audio provider. To enable real cloud post-meeting processing, set an OpenAI API key before starting the app:
+
+```powershell
+$env:OPENAI_API_KEY = "..."
+pnpm dev
+```
+
+For local testing, you can also create a `.env` file in the repository root. `.env` is ignored by git:
+
+```text
+OPENAI_API_KEY=...
+```
+
 Run the desktop app with explicit demo providers:
 
 ```powershell
@@ -63,7 +76,7 @@ pnpm build
 pnpm exec electron . --meetmap-demo
 ```
 
-Demo mode uses fake local workflow and audio providers. It creates local demo artifacts so the UI and post-meeting flow can be exercised before production provider wiring lands.
+Demo mode uses fake local workflow and audio providers. It creates local demo artifacts so the UI and post-meeting flow can be exercised without recording real audio or uploading data to cloud providers.
 
 ## Development Commands
 

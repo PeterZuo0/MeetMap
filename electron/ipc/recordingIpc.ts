@@ -17,6 +17,17 @@ export type RecordingIpcContext = {
   createAudioCaptureProvider?: () => AudioCaptureProvider;
 };
 
+export type RecordingStartIpcOptions = {
+  audioSources?: {
+    system?: boolean;
+    microphone?: boolean;
+  };
+  deviceIds?: {
+    system?: string;
+    microphone?: string;
+  };
+};
+
 export function registerRecordingIpc({
   store,
   audioCaptureMode = "production",
@@ -29,9 +40,21 @@ export function registerRecordingIpc({
       }
     | undefined;
 
+  ipcMain.handle("recording:list-devices", async () => {
+    const provider = resolveAudioCaptureProvider({
+      mode: audioCaptureMode,
+      createAudioCaptureProvider
+    });
+    return provider.listDevices();
+  });
+
   ipcMain.handle(
     "recording:start",
-    async (_event, meetingId: string): Promise<MeetingMetadata> => {
+    async (
+      _event,
+      meetingId: string,
+      options?: RecordingStartIpcOptions
+    ): Promise<MeetingMetadata> => {
       if (activeSession) {
         throw new Error("A recording is already active");
       }
@@ -39,6 +62,7 @@ export function registerRecordingIpc({
       const metadata = await store.readMetadata(meetingId);
       const paths = store.getMeetingPaths(meetingId);
       await mkdir(paths.audioDir, { recursive: true });
+      const requestedSources = normalizeAudioSources(options);
 
       const session = createRecordingSession({
         provider: resolveAudioCaptureProvider({
@@ -49,12 +73,18 @@ export function registerRecordingIpc({
       await session.start({
         meetingId,
         tracks: {
-          system: {
-            filePath: join(paths.audioDir, "system.wav")
-          },
-          microphone: {
-            filePath: join(paths.audioDir, "microphone.wav")
-          }
+          system: requestedSources.system
+            ? {
+                filePath: join(paths.audioDir, "system.wav"),
+                deviceId: options?.deviceIds?.system
+              }
+            : undefined,
+          microphone: requestedSources.microphone
+            ? {
+                filePath: join(paths.audioDir, "microphone.wav"),
+                deviceId: options?.deviceIds?.microphone
+              }
+            : undefined
         }
       });
       activeSession = { meetingId, session };
@@ -115,6 +145,20 @@ export function registerRecordingIpc({
       }
     }
   });
+}
+
+function normalizeAudioSources(options?: RecordingStartIpcOptions): {
+  system: boolean;
+  microphone: boolean;
+} {
+  const system = options?.audioSources?.system ?? true;
+  const microphone = options?.audioSources?.microphone ?? true;
+
+  if (!system && !microphone) {
+    throw new Error("Cannot start recording without audio sources");
+  }
+
+  return { system, microphone };
 }
 
 async function persistFailedRecordingMetadata({

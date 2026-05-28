@@ -114,6 +114,116 @@ function createSuccessfulStopProvider(): AudioCaptureProvider {
   };
 }
 
+function createCapturingProvider(requests: AudioCaptureStartRequest[]): AudioCaptureProvider {
+  return {
+    async listDevices() {
+      return [];
+    },
+    async start(startRequest) {
+      requests.push(startRequest);
+    },
+    async stop() {
+      return { tracks: {} };
+    },
+    onLevel() {
+      return () => {};
+    },
+    onError() {
+      return () => {};
+    }
+  };
+}
+
+test("starts only selected audio sources", async () => {
+  const baseDirectory = await mkdtemp(join(tmpdir(), "meetmap-recording-ipc-"));
+
+  try {
+    const requests: AudioCaptureStartRequest[] = [];
+    const store = createMeetingStore(baseDirectory);
+    const meeting = await store.createMeeting({
+      id: "recording-system-only",
+      title: "Recording System Only",
+      outputLanguage: "en"
+    });
+
+    registerRecordingIpc({
+      store,
+      createAudioCaptureProvider: () => createCapturingProvider(requests)
+    } as RecordingIpcContext);
+
+    await getHandler("recording:start")(
+      null,
+      meeting.id as never,
+      {
+        audioSources: { system: true, microphone: false },
+        deviceIds: { system: "speaker-1" }
+      } as never
+    );
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.tracks.system?.filePath).toContain("system.wav");
+    expect(requests[0]?.tracks.system?.deviceId).toBe("speaker-1");
+    expect(requests[0]?.tracks.microphone).toBeUndefined();
+  } finally {
+    await rm(baseDirectory, { force: true, recursive: true });
+  }
+});
+
+test("lists audio devices from the configured capture provider", async () => {
+  const baseDirectory = await mkdtemp(join(tmpdir(), "meetmap-recording-ipc-"));
+
+  try {
+    const store = createMeetingStore(baseDirectory);
+    registerRecordingIpc({
+      store,
+      createAudioCaptureProvider: () => ({
+        ...createCapturingProvider([]),
+        async listDevices() {
+          return [
+            { id: "speaker-1", label: "Speakers", track: "system" as const },
+            { id: "mic-1", label: "Microphone", track: "microphone" as const }
+          ];
+        }
+      })
+    } as RecordingIpcContext);
+
+    await expect(getHandler("recording:list-devices")(null)).resolves.toEqual([
+      { id: "speaker-1", label: "Speakers", track: "system" },
+      { id: "mic-1", label: "Microphone", track: "microphone" }
+    ]);
+  } finally {
+    await rm(baseDirectory, { force: true, recursive: true });
+  }
+});
+
+test("rejects start when no audio sources are selected", async () => {
+  const baseDirectory = await mkdtemp(join(tmpdir(), "meetmap-recording-ipc-"));
+
+  try {
+    const store = createMeetingStore(baseDirectory);
+    const meeting = await store.createMeeting({
+      id: "recording-no-sources",
+      title: "Recording No Sources",
+      outputLanguage: "en"
+    });
+
+    registerRecordingIpc({
+      store,
+      createAudioCaptureProvider: () => createCapturingProvider([])
+    } as RecordingIpcContext);
+
+    await expect(
+      getHandler("recording:start")(
+        null,
+        meeting.id as never,
+        { audioSources: { system: false, microphone: false } } as never
+      )
+    ).rejects.toThrow("Cannot start recording without audio sources");
+  } finally {
+    await rm(baseDirectory, { force: true, recursive: true });
+  }
+});
+
 test("clears the active recording session and marks metadata failed when stop fails", async () => {
   const baseDirectory = await mkdtemp(join(tmpdir(), "meetmap-recording-ipc-"));
 
