@@ -5,6 +5,7 @@ import { createOpenAiMeetingStructureClient } from "../src/features/intelligence
 import { createOpenAiRequesters } from "../src/features/providers/openAiRequesters.js";
 import { createOpenAiTranscriptionClient } from "../src/features/transcription/openAiTranscriptionClient.js";
 import {
+  assertProductionSmokeInputCanStart,
   parseProductionSmokeArgs,
   runProductionSmoke,
   type ProductionSmokeInput,
@@ -20,6 +21,7 @@ async function main(): Promise<void> {
       filePath: join(process.cwd(), ".env")
     });
     const input = parseProductionSmokeArgs(process.argv.slice(2));
+    assertProductionSmokeInputCanStart(input);
     const providerConfig = parseProviderConfig(process.env);
 
     if (providerConfig.mode !== "production") {

@@ -60,13 +60,7 @@ export async function runProductionSmoke(
   input: ProductionSmokeInput,
   dependencies: ProductionSmokeDependencies
 ): Promise<ProductionSmokeReport> {
-  if (!input.allowCloudUpload) {
-    throw new Error("Production smoke requires --allow-cloud-upload.");
-  }
-
-  if (!input.systemAudioPath && !input.microphoneAudioPath) {
-    throw new Error("No audio source was provided.");
-  }
+  assertProductionSmokeInputCanStart(input);
 
   const store = createMeetingStore(input.dataDir);
   const meeting = await store.createMeeting({
@@ -120,6 +114,21 @@ export async function runProductionSmoke(
     transcriptPath: resolve(paths.transcriptPath),
     wordExportPath: resolve(paths.wordExportPath)
   };
+}
+
+export function assertProductionSmokeInputCanStart(
+  input: Pick<
+    ProductionSmokeInput,
+    "allowCloudUpload" | "microphoneAudioPath" | "systemAudioPath"
+  >
+): void {
+  if (!input.allowCloudUpload) {
+    throw new Error("Production smoke requires --allow-cloud-upload.");
+  }
+
+  if (!input.systemAudioPath && !input.microphoneAudioPath) {
+    throw new Error("No audio source was provided.");
+  }
 }
 
 export function parseProductionSmokeArgs(args: string[]): ProductionSmokeInput {
