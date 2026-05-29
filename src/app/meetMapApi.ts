@@ -18,6 +18,7 @@ export type RecordingAudioLevel = {
   track: AudioTrackId;
   level: number;
   occurredAt: string;
+  source?: "preflight" | "recording";
 };
 
 export type RecordingStartOptions = {
@@ -35,6 +36,8 @@ export type MeetMapApi = {
 	    summaryStyle?: SummaryStyle;
 	  }): Promise<MeetingMetadata>;
   startRecording(meetingId: string, options?: RecordingStartOptions): Promise<MeetingMetadata>;
+  startAudioProbe?(options?: RecordingStartOptions): Promise<void>;
+  stopAudioProbe?(): Promise<void>;
   pauseRecording?(): Promise<MeetingMetadata>;
   resumeRecording?(): Promise<MeetingMetadata>;
   stopRecording(): Promise<MeetingMetadata>;

@@ -6,7 +6,8 @@ import { createMeetingStore } from "../../src/features/meetings/meetingStore";
 import type { MeetingMetadata } from "../../src/features/meetings/meetingTypes";
 import type {
   AudioCaptureProvider,
-  AudioCaptureStartRequest
+  AudioCaptureStartRequest,
+  AudioLevelUpdate
 } from "../../src/features/recording/audioCaptureProvider";
 import { registerRecordingIpc, type RecordingIpcContext } from "./recordingIpc";
 
@@ -140,6 +141,49 @@ function createCapturingProvider(
     onError() {
       return () => {};
     }
+  };
+}
+
+function createLevelCapturingProvider(
+  requests: AudioCaptureStartRequest[],
+  levelCallbacks: Array<(update: AudioLevelUpdate) => void>,
+  stops: string[] = []
+): AudioCaptureProvider {
+  return {
+    async listDevices() {
+      return [];
+    },
+    async start(startRequest) {
+      requests.push(startRequest);
+    },
+    async stop() {
+      stops.push("stop");
+      return { tracks: {} };
+    },
+    onLevel(callback) {
+      levelCallbacks.push(callback);
+      return () => {
+        stops.push("unsubscribe-level");
+      };
+    },
+    onError() {
+      return () => {};
+    }
+  };
+}
+
+function createIpcEvent() {
+  const sent: Array<{ channel: string; update: unknown }> = [];
+
+  return {
+    event: {
+      sender: {
+        send(channel: string, update: unknown) {
+          sent.push({ channel, update });
+        }
+      }
+    },
+    sent
   };
 }
 
@@ -365,6 +409,134 @@ test("does not start recording with a silent demo provider fallback", async () =
     await expect(
       getHandler("recording:start")(null, meeting.id as never)
     ).rejects.toThrow("Audio capture provider must be configured");
+  } finally {
+    await rm(baseDirectory, { force: true, recursive: true });
+  }
+});
+
+test("starts an audio preflight probe with selected sources", async () => {
+  const baseDirectory = await mkdtemp(join(tmpdir(), "meetmap-recording-ipc-"));
+
+  try {
+    const requests: AudioCaptureStartRequest[] = [];
+    const store = createMeetingStore(baseDirectory);
+
+    registerRecordingIpc({
+      store,
+      createAudioCaptureProvider: () => createCapturingProvider(requests)
+    } as RecordingIpcContext);
+
+    await getHandler("recording:probe-start")(
+      createIpcEvent().event as never,
+      {
+        audioSources: { system: true, microphone: false },
+        deviceIds: { system: "speaker-1" }
+      } as never
+    );
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({
+      meetingId: "preflight",
+      tracks: {
+        system: {
+          deviceId: "speaker-1"
+        }
+      }
+    });
+    expect(requests[0]?.tracks.system?.filePath).toContain("meetmap-preflight-");
+    expect(requests[0]?.tracks.system?.filePath).toContain("system.wav");
+    expect(requests[0]?.tracks.microphone).toBeUndefined();
+  } finally {
+    await rm(baseDirectory, { force: true, recursive: true });
+  }
+});
+
+test("forwards preflight level updates with a source marker", async () => {
+  const baseDirectory = await mkdtemp(join(tmpdir(), "meetmap-recording-ipc-"));
+
+  try {
+    const requests: AudioCaptureStartRequest[] = [];
+    const levelCallbacks: Array<(update: AudioLevelUpdate) => void> = [];
+    const store = createMeetingStore(baseDirectory);
+    const { event, sent } = createIpcEvent();
+
+    registerRecordingIpc({
+      store,
+      createAudioCaptureProvider: () =>
+        createLevelCapturingProvider(requests, levelCallbacks)
+    } as RecordingIpcContext);
+
+    await getHandler("recording:probe-start")(
+      event as never,
+      { audioSources: { system: false, microphone: true } } as never
+    );
+    levelCallbacks[0]?.({
+      track: "microphone",
+      level: 0.4,
+      occurredAt: "2026-05-29T00:00:01.000Z"
+    });
+
+    expect(sent).toEqual([
+      {
+        channel: "recording:level",
+        update: {
+          track: "microphone",
+          level: 0.4,
+          occurredAt: "2026-05-29T00:00:01.000Z",
+          source: "preflight"
+        }
+      }
+    ]);
+  } finally {
+    await rm(baseDirectory, { force: true, recursive: true });
+  }
+});
+
+test("keeps audio probe and active recording mutually exclusive", async () => {
+  const baseDirectory = await mkdtemp(join(tmpdir(), "meetmap-recording-ipc-"));
+
+  try {
+    const requests: AudioCaptureStartRequest[] = [];
+    const stops: string[] = [];
+    const store = createMeetingStore(baseDirectory);
+    const meeting = await store.createMeeting({
+      id: "recording-after-probe",
+      title: "Recording After Probe",
+      outputLanguage: "en"
+    });
+
+    registerRecordingIpc({
+      store,
+      createAudioCaptureProvider: () =>
+        createLevelCapturingProvider(requests, [], stops)
+    } as RecordingIpcContext);
+
+    await getHandler("recording:probe-start")(
+      createIpcEvent().event as never,
+      { audioSources: { system: true, microphone: true } } as never
+    );
+
+    await expect(
+      getHandler("recording:start")(null, meeting.id as never)
+    ).rejects.toThrow("Stop audio probe before starting recording");
+
+    await getHandler("recording:probe-stop")(null);
+    expect(stops).toContain("stop");
+    expect(stops).toContain("unsubscribe-level");
+
+    await expect(
+      getHandler("recording:start")(null, meeting.id as never)
+    ).resolves.toMatchObject({
+      id: meeting.id,
+      status: "recording"
+    } satisfies Partial<MeetingMetadata>);
+
+    await expect(
+      getHandler("recording:probe-start")(
+        createIpcEvent().event as never,
+        { audioSources: { system: true, microphone: false } } as never
+      )
+    ).rejects.toThrow("Cannot start audio probe while recording is active");
   } finally {
     await rm(baseDirectory, { force: true, recursive: true });
   }

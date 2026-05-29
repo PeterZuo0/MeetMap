@@ -11,6 +11,11 @@ contextBridge.exposeInMainWorld("meetMap", {
       deviceIds?: { system?: string; microphone?: string };
     }
   ) => ipcRenderer.invoke("recording:start", meetingId, options),
+  startAudioProbe: (options?: {
+    audioSources: { system: boolean; microphone: boolean };
+    deviceIds?: { system?: string; microphone?: string };
+  }) => ipcRenderer.invoke("recording:probe-start", options),
+  stopAudioProbe: () => ipcRenderer.invoke("recording:probe-stop"),
   pauseRecording: () => ipcRenderer.invoke("recording:pause"),
   resumeRecording: () => ipcRenderer.invoke("recording:resume"),
   stopRecording: () => ipcRenderer.invoke("recording:stop"),

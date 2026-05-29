@@ -1,9 +1,11 @@
-import { mkdir } from "node:fs/promises";
+import { mkdtemp, mkdir, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ipcMain } from "electron";
 import type { MeetingMetadata } from "../../src/features/meetings/meetingTypes.js";
 import type { MeetingStore } from "../../src/features/meetings/meetingStore.js";
 import type {
+  AudioCaptureStartRequest,
   AudioCaptureProvider,
   AudioCaptureUnsubscribe
 } from "../../src/features/recording/audioCaptureProvider.js";
@@ -41,6 +43,13 @@ export function registerRecordingIpc({
         unsubscribeLevel: AudioCaptureUnsubscribe;
       }
     | undefined;
+  let activeProbe:
+    | {
+        provider: AudioCaptureProvider;
+        tempDirectory: string;
+        unsubscribeLevel: AudioCaptureUnsubscribe;
+      }
+    | undefined;
 
   ipcMain.handle("recording:list-devices", async () => {
     const provider = resolveAudioCaptureProvider({
@@ -60,6 +69,9 @@ export function registerRecordingIpc({
       if (activeSession) {
         throw new Error("A recording is already active");
       }
+      if (activeProbe) {
+        throw new Error("Stop audio probe before starting recording");
+      }
 
       const metadata = await store.readMetadata(meetingId);
       const paths = store.getMeetingPaths(meetingId);
@@ -71,7 +83,7 @@ export function registerRecordingIpc({
         createAudioCaptureProvider
       });
       const unsubscribeLevel = provider.onLevel((update) => {
-        _event.sender.send("recording:level", update);
+        _event.sender.send("recording:level", { ...update, source: "recording" });
       });
       const session = createRecordingSession({ provider });
       try {
@@ -173,6 +185,57 @@ export function registerRecordingIpc({
     await activeSession.session.resume();
     return store.readMetadata(activeSession.meetingId);
   });
+
+  ipcMain.handle(
+    "recording:probe-start",
+    async (_event, options?: RecordingStartIpcOptions): Promise<void> => {
+      if (activeSession) {
+        throw new Error("Cannot start audio probe while recording is active");
+      }
+      if (activeProbe) {
+        throw new Error("Audio probe is already active");
+      }
+
+      const requestedSources = normalizeAudioSources(options);
+      const tempDirectory = await mkdtemp(join(tmpdir(), "meetmap-preflight-"));
+      const provider = resolveAudioCaptureProvider({
+        mode: audioCaptureMode,
+        createAudioCaptureProvider
+      });
+      const unsubscribeLevel = provider.onLevel((update) => {
+        _event.sender.send("recording:level", { ...update, source: "preflight" });
+      });
+
+      try {
+        await provider.start(createProbeStartRequest({ options, requestedSources, tempDirectory }));
+      } catch (error) {
+        unsubscribeLevel();
+        await rm(tempDirectory, { force: true, recursive: true });
+        throw error;
+      }
+
+      activeProbe = {
+        provider,
+        tempDirectory,
+        unsubscribeLevel
+      };
+    }
+  );
+
+  ipcMain.handle("recording:probe-stop", async (): Promise<void> => {
+    if (!activeProbe) {
+      return;
+    }
+
+    const probe = activeProbe;
+    activeProbe = undefined;
+    try {
+      await probe.provider.stop();
+    } finally {
+      probe.unsubscribeLevel();
+      await rm(probe.tempDirectory, { force: true, recursive: true });
+    }
+  });
 }
 
 function normalizeAudioSources(options?: RecordingStartIpcOptions): {
@@ -187,6 +250,34 @@ function normalizeAudioSources(options?: RecordingStartIpcOptions): {
   }
 
   return { system, microphone };
+}
+
+function createProbeStartRequest({
+  options,
+  requestedSources,
+  tempDirectory
+}: {
+  options: RecordingStartIpcOptions | undefined;
+  requestedSources: { system: boolean; microphone: boolean };
+  tempDirectory: string;
+}): AudioCaptureStartRequest {
+  return {
+    meetingId: "preflight",
+    tracks: {
+      system: requestedSources.system
+        ? {
+            filePath: join(tempDirectory, "system.wav"),
+            deviceId: options?.deviceIds?.system
+          }
+        : undefined,
+      microphone: requestedSources.microphone
+        ? {
+            filePath: join(tempDirectory, "microphone.wav"),
+            deviceId: options?.deviceIds?.microphone
+          }
+        : undefined
+    }
+  };
 }
 
 async function persistFailedRecordingMetadata({
