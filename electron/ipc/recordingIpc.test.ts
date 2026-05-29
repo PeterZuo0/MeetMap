@@ -541,3 +541,35 @@ test("keeps audio probe and active recording mutually exclusive", async () => {
     await rm(baseDirectory, { force: true, recursive: true });
   }
 });
+
+test("replaces an active audio probe when setup starts a new probe", async () => {
+  const baseDirectory = await mkdtemp(join(tmpdir(), "meetmap-recording-ipc-"));
+
+  try {
+    const requests: AudioCaptureStartRequest[] = [];
+    const stops: string[] = [];
+    const store = createMeetingStore(baseDirectory);
+
+    registerRecordingIpc({
+      store,
+      createAudioCaptureProvider: () =>
+        createLevelCapturingProvider(requests, [], stops)
+    } as RecordingIpcContext);
+
+    await getHandler("recording:probe-start")(
+      createIpcEvent().event as never,
+      { audioSources: { system: true, microphone: true } } as never
+    );
+    await getHandler("recording:probe-start")(
+      createIpcEvent().event as never,
+      { audioSources: { system: true, microphone: false } } as never
+    );
+
+    expect(stops).toEqual(["stop", "unsubscribe-level"]);
+    expect(requests).toHaveLength(2);
+    expect(requests[1]?.tracks.system).toBeDefined();
+    expect(requests[1]?.tracks.microphone).toBeUndefined();
+  } finally {
+    await rm(baseDirectory, { force: true, recursive: true });
+  }
+});

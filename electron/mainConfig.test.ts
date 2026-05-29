@@ -62,9 +62,21 @@ test("resolves native audio project from app path in development", () => {
     resolveNativeAudioHelperPath({
       appPath: "C:/repo/MeetMap",
       resourcesPath: "C:/repo/MeetMap/resources",
-      isPackaged: false
+      isPackaged: false,
+      fileExists: () => false
     })
   ).toBe("C:\\repo\\MeetMap\\native\\windows-audio\\src\\MeetMap.WindowsAudio.csproj");
+});
+
+test("prefers the published native audio helper in development when it exists", () => {
+  expect(
+    resolveNativeAudioHelperPath({
+      appPath: "C:/repo/MeetMap",
+      resourcesPath: "C:/repo/MeetMap/resources",
+      isPackaged: false,
+      fileExists: (filePath) => filePath.endsWith("publish\\meetmap-windows-audio.exe")
+    })
+  ).toBe("C:\\repo\\MeetMap\\native\\windows-audio\\src\\bin\\Release\\net8.0-windows\\win-x64\\publish\\meetmap-windows-audio.exe");
 });
 
 test("resolves native audio project from resources in packaged app", () => {

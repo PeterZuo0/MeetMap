@@ -193,7 +193,9 @@ export function registerRecordingIpc({
         throw new Error("Cannot start audio probe while recording is active");
       }
       if (activeProbe) {
-        throw new Error("Audio probe is already active");
+        const previousProbe = activeProbe;
+        activeProbe = undefined;
+        await stopActiveProbe(previousProbe);
       }
 
       const requestedSources = normalizeAudioSources(options);
@@ -229,13 +231,21 @@ export function registerRecordingIpc({
 
     const probe = activeProbe;
     activeProbe = undefined;
-    try {
-      await probe.provider.stop();
-    } finally {
-      probe.unsubscribeLevel();
-      await rm(probe.tempDirectory, { force: true, recursive: true });
-    }
+    await stopActiveProbe(probe);
   });
+}
+
+async function stopActiveProbe(probe: {
+  provider: AudioCaptureProvider;
+  tempDirectory: string;
+  unsubscribeLevel: AudioCaptureUnsubscribe;
+}): Promise<void> {
+  try {
+    await probe.provider.stop();
+  } finally {
+    probe.unsubscribeLevel();
+    await rm(probe.tempDirectory, { force: true, recursive: true });
+  }
 }
 
 function normalizeAudioSources(options?: RecordingStartIpcOptions): {

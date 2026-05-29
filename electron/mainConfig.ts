@@ -1,4 +1,5 @@
 import path from "node:path";
+import { existsSync } from "node:fs";
 import { parseProviderConfig } from "../src/features/config/providerConfig.js";
 import { createOpenAiMeetingStructureClient } from "../src/features/intelligence/openAiMeetingStructureClient.js";
 import { createOpenAiRequesters } from "../src/features/providers/openAiRequesters.js";
@@ -100,17 +101,36 @@ export function resolveMainRuntimeConfig({
 export function resolveNativeAudioHelperPath({
   appPath,
   resourcesPath,
-  isPackaged
+  isPackaged,
+  fileExists = existsSync
 }: {
   appPath: string;
   resourcesPath: string;
   isPackaged: boolean;
+  fileExists?: (filePath: string) => boolean;
 }): string {
   const nativeRoot = isPackaged
     ? path.join(resourcesPath, "native")
     : path.join(appPath, "native");
-  return isPackaged
-    ? path.join(nativeRoot, "windows-audio", "meetmap-windows-audio.exe")
+  const packagedHelperPath = path.join(nativeRoot, "windows-audio", "meetmap-windows-audio.exe");
+  if (isPackaged) {
+    return packagedHelperPath;
+  }
+
+  const developmentPublishedHelperPath = path.join(
+    nativeRoot,
+    "windows-audio",
+    "src",
+    "bin",
+    "Release",
+    "net8.0-windows",
+    "win-x64",
+    "publish",
+    "meetmap-windows-audio.exe"
+  );
+
+  return fileExists(developmentPublishedHelperPath)
+    ? developmentPublishedHelperPath
     : path.join(nativeRoot, "windows-audio", "src", "MeetMap.WindowsAudio.csproj");
 }
 
