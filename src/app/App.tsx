@@ -1,7 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { MeetingMetadata, ProcessingStep, SummaryStyle } from "../features/meetings/meetingTypes";
 import type { LanguageOptionValue } from "../features/settings/languageOptions";
 import type { ProcessingPreferences } from "../features/settings/processingPreferences";
+import {
+  createAudioPreflightState,
+  type AudioPreflightLevelSample
+} from "../features/audio-analysis/audioPreflight";
 import type {
   AppSettings,
   ExportOptions,
@@ -40,6 +44,9 @@ export function App() {
     microphone: true
   });
   const [liveAudioLevels, setLiveAudioLevels] = useState<Partial<Record<"system" | "microphone", RecordingAudioLevel>>>({});
+  const [preflightLevels, setPreflightLevels] = useState<Partial<Record<"system" | "microphone", AudioPreflightLevelSample[]>>>({});
+  const [preflightUnavailableTracks, setPreflightUnavailableTracks] = useState<Partial<Record<"system" | "microphone", string>>>({});
+  const [preflightNow, setPreflightNow] = useState(() => new Date().toISOString());
   const [isStarting, setIsStarting] = useState(false);
   const [isStopping, setIsStopping] = useState(false);
   const [isRecordingPaused, setIsRecordingPaused] = useState(false);
@@ -48,6 +55,7 @@ export function App() {
   const [settingsInitialSection, setSettingsInitialSection] = useState<SettingsSectionId>("general");
   const [error, setError] = useState<string | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
+  const preflightProbeActiveRef = useRef(false);
 
   useEffect(() => {
     document.body.classList.toggle("theme-dark", settings.theme === "dark");
@@ -86,12 +94,76 @@ export function App() {
     }
 
     return api.onAudioLevel((update) => {
+      if (update.source === "preflight") {
+        setPreflightLevels((current) => appendPreflightSample(current, update));
+        return;
+      }
+
       setLiveAudioLevels((current) => ({
         ...current,
         [update.track]: update
       }));
     });
   }, [api]);
+
+  useEffect(() => {
+    if (phase !== "pre") {
+      return;
+    }
+
+    const interval = window.setInterval(() => {
+      setPreflightNow(new Date().toISOString());
+    }, 500);
+
+    return () => window.clearInterval(interval);
+  }, [phase]);
+
+  useEffect(() => {
+    if (phase !== "pre" || !api?.startAudioProbe) {
+      return;
+    }
+
+    let cancelled = false;
+    setPreflightLevels({});
+    setPreflightUnavailableTracks({});
+    setPreflightNow(new Date().toISOString());
+    void api.startAudioProbe({
+      audioSources: draftAudioSources,
+      deviceIds: selectedAudioDeviceIds
+    }).then(() => {
+      if (cancelled) {
+        void api.stopAudioProbe?.();
+        return;
+      }
+      preflightProbeActiveRef.current = true;
+    }).catch((caughtError) => {
+      if (cancelled) {
+        return;
+      }
+
+      const message = formatError(caughtError);
+      setPreflightUnavailableTracks({
+        system: draftAudioSources.system ? message : undefined,
+        microphone: draftAudioSources.microphone ? message : undefined
+      });
+      setError(message);
+    });
+
+    return () => {
+      cancelled = true;
+      if (preflightProbeActiveRef.current) {
+        preflightProbeActiveRef.current = false;
+        void api.stopAudioProbe?.();
+      }
+    };
+  }, [
+    api,
+    phase,
+    draftAudioSources.system,
+    draftAudioSources.microphone,
+    selectedAudioDeviceIds.system,
+    selectedAudioDeviceIds.microphone
+  ]);
 
   const crumbs = useMemo(() => {
     switch (phase) {
@@ -114,6 +186,12 @@ export function App() {
   const displayedAudioSources = api?.onAudioLevel
     ? deriveDetectedAudioSources(activeAudioSources, liveAudioLevels)
     : activeAudioSources;
+  const audioPreflight = createAudioPreflightState({
+    enabledSources: draftAudioSources,
+    now: preflightNow,
+    samples: api?.startAudioProbe ? preflightLevels : createFallbackPreflightSamples(draftAudioSources, preflightNow),
+    unavailableTracks: preflightUnavailableTracks
+  });
 
   function navigate(nextPhase: WorkflowPhase) {
     setError(null);
@@ -146,6 +224,10 @@ export function App() {
     setIsStarting(true);
     setError(null);
     try {
+      if (api.stopAudioProbe && preflightProbeActiveRef.current) {
+        preflightProbeActiveRef.current = false;
+        await api.stopAudioProbe();
+      }
       const createdMeeting = await api.createMeeting({
         title,
         outputLanguage: draftOutputLanguage,
@@ -301,6 +383,7 @@ export function App() {
             audioSources={draftAudioSources}
             devices={audioDevices}
             selectedDeviceIds={selectedAudioDeviceIds}
+            audioPreflight={audioPreflight}
             outputLanguage={draftOutputLanguage}
             summaryStyle={draftSummaryStyle}
             title={draftTitle}
@@ -378,6 +461,35 @@ function buildProcessingPreferences(settings: AppSettings): ProcessingPreference
     uploadRecordedAudio: settings.uploadRecordedAudio,
     uploadSeparateTracks: settings.uploadSeparateTracks,
     useOutputLanguage: settings.useOutputLanguage
+  };
+}
+
+function appendPreflightSample(
+  current: Partial<Record<"system" | "microphone", AudioPreflightLevelSample[]>>,
+  update: RecordingAudioLevel
+): Partial<Record<"system" | "microphone", AudioPreflightLevelSample[]>> {
+  const sample = {
+    level: update.level,
+    occurredAt: update.occurredAt
+  };
+  const cutoffMs = Date.parse(update.occurredAt) - 5000;
+  const existing = current[update.track] ?? [];
+
+  return {
+    ...current,
+    [update.track]: [...existing, sample].filter(
+      (item) => Date.parse(item.occurredAt) >= cutoffMs
+    )
+  };
+}
+
+function createFallbackPreflightSamples(
+  audioSources: RecordingAudioSources,
+  now: string
+): Partial<Record<"system" | "microphone", AudioPreflightLevelSample[]>> {
+  return {
+    system: audioSources.system ? [{ level: 1, occurredAt: now }] : undefined,
+    microphone: audioSources.microphone ? [{ level: 1, occurredAt: now }] : undefined
   };
 }
 

@@ -1,6 +1,7 @@
 import type { LanguageOptionValue } from "../../features/settings/languageOptions";
 import { LANGUAGE_OPTIONS } from "../../features/settings/languageOptions";
 import type { AudioTrackId, SummaryStyle } from "../../features/meetings/meetingTypes";
+import type { AudioPreflightState, AudioPreflightTrackState } from "../../features/audio-analysis/audioPreflight";
 import type { ReactNode } from "react";
 import type { RecordingAudioDevice, RecordingAudioSources, UiLanguage } from "../meetMapApi";
 import { label } from "./copy";
@@ -14,6 +15,7 @@ export function PreRecordingScreen({
   audioSources,
   devices,
   selectedDeviceIds,
+  audioPreflight,
   error,
   isStarting,
   onTitleChange,
@@ -32,6 +34,7 @@ export function PreRecordingScreen({
   audioSources: RecordingAudioSources;
   devices: RecordingAudioDevice[];
   selectedDeviceIds: Partial<Record<AudioTrackId, string>>;
+  audioPreflight: AudioPreflightState;
   error: string | null;
   isStarting: boolean;
   onTitleChange(title: string): void;
@@ -43,8 +46,8 @@ export function PreRecordingScreen({
   onCancel(): void;
   onOpenPrivacySettings(): void;
 }) {
-  const canStart = audioSources.system || audioSources.microphone;
-  const sourceStatus = getSourceStatus(audioSources);
+  const canStart = audioPreflight.canStart;
+  const sourceStatus = getSourceStatus(audioPreflight);
 
   function updateSource(track: keyof RecordingAudioSources, enabled: boolean) {
     onAudioSourcesChange({ ...audioSources, [track]: enabled });
@@ -108,10 +111,10 @@ export function PreRecordingScreen({
         <AudioSourceCard
           enabled={audioSources.system}
           icon="monitor"
-          level={audioSources.system ? 0.62 : 0}
           onToggle={(enabled) => updateSource("system", enabled)}
           source="Meeting · Zoom · 会议室 03"
           subtitle="What you hear on this PC"
+          trackState={audioPreflight.tracks.system}
           title="System audio"
           deviceFallback="Default — Realtek HD Audio"
           devices={devices.filter((device) => device.track === "system")}
@@ -123,9 +126,9 @@ export function PreRecordingScreen({
           accent
           enabled={audioSources.microphone}
           icon="mic"
-          level={audioSources.microphone ? 0.34 : 0}
           onToggle={(enabled) => updateSource("microphone", enabled)}
           subtitle="What you say"
+          trackState={audioPreflight.tracks.microphone}
           title="Microphone"
           deviceFallback="Shure MV7 · USB"
           devices={devices.filter((device) => device.track === "microphone")}
@@ -135,8 +138,8 @@ export function PreRecordingScreen({
         />
       </div>
 
-      {!canStart ? (
-        <div className="error-box pre-recording-warning">No audio source selected. Enable system audio or microphone to start recording.</div>
+      {audioPreflight.blockingReason ? (
+        <div className="error-box pre-recording-warning">{audioPreflight.blockingReason}</div>
       ) : null}
 
       <h2 className="h2 pre-block-title">Language & processing</h2>
@@ -195,20 +198,28 @@ const SUMMARY_STYLE_OPTIONS: Array<{ label: string; value: SummaryStyle }> = [
   { label: "Highlights", value: "highlights" }
 ];
 
-function getSourceStatus(audioSources: RecordingAudioSources): { label: string; tone: "positive" | "warn" | "danger" } {
-  if (audioSources.system && audioSources.microphone) {
+function getSourceStatus(audioPreflight: AudioPreflightState): { label: string; tone: "positive" | "warn" | "danger" } {
+  if (audioPreflight.summary === "both-detected") {
     return { label: "Both detected", tone: "positive" };
   }
 
-  if (audioSources.system) {
+  if (audioPreflight.summary === "system-only") {
     return { label: "System audio only", tone: "warn" };
   }
 
-  if (audioSources.microphone) {
+  if (audioPreflight.summary === "microphone-only") {
     return { label: "Microphone only", tone: "warn" };
   }
 
-  return { label: "No sources selected", tone: "danger" };
+  if (audioPreflight.summary === "none-selected") {
+    return { label: "No sources selected", tone: "danger" };
+  }
+
+  if (audioPreflight.summary === "unavailable") {
+    return { label: "Audio probe unavailable", tone: "danger" };
+  }
+
+  return { label: "Waiting for audio", tone: "warn" };
 }
 
 function AudioSourceCard({
@@ -220,7 +231,7 @@ function AudioSourceCard({
   selectedDeviceId,
   hint,
   source,
-  level,
+  trackState,
   enabled,
   accent = false,
   onToggle,
@@ -234,7 +245,7 @@ function AudioSourceCard({
   selectedDeviceId?: string;
   hint: string;
   source?: string;
-  level: number;
+  trackState: AudioPreflightTrackState;
   enabled: boolean;
   accent?: boolean;
   onToggle(enabled: boolean): void;
@@ -243,7 +254,7 @@ function AudioSourceCard({
   const deviceValue = selectedDeviceId ?? devices[0]?.id ?? "default";
 
   return (
-    <div className={`pre-audio-card ${enabled ? "" : "disabled"}`}>
+    <div className={`pre-audio-card ${enabled ? "" : "disabled"} ${trackState.status === "quiet" || trackState.status === "stale" ? "warning" : ""} ${trackState.status === "unavailable" ? "unavailable" : ""}`}>
       <div className="pre-audio-title">
         <div className={`pre-audio-icon ${accent ? "accent" : ""}`}>
           <Icon name={icon} size={18} />
@@ -251,7 +262,7 @@ function AudioSourceCard({
         <div>
           <div className="pre-audio-name">
             <span>{title}</span>
-            <span className={`chip ${enabled ? "dot ok" : ""}`}>{enabled ? "Detected" : "Off"}</span>
+            <span className={`chip ${chipTone(trackState.status)}`}>{formatTrackStatus(trackState.status)}</span>
           </div>
           <div className="sub">{subtitle}</div>
         </div>
@@ -286,13 +297,45 @@ function AudioSourceCard({
       </label>
       <div className="input-level-label">
         <span>Input level</span>
-        <span>{Math.round(level * 100)}%</span>
+        <span>{Math.round(trackState.level * 100)}%</span>
       </div>
-      <LevelMeter level={level} />
+      <LevelMeter level={trackState.level} />
       {source ? <div className="source-pill">{source}</div> : null}
-      <p className="sub">{hint}</p>
+      <p className="sub">{trackState.message || hint}</p>
+      {trackState.peakLevel > 0 ? <p className="sub">Peak {Math.round(trackState.peakLevel * 100)}%</p> : null}
     </div>
   );
+}
+
+function formatTrackStatus(status: AudioPreflightTrackState["status"]): string {
+  switch (status) {
+    case "detecting":
+      return "Detecting";
+    case "detected":
+      return "Detected";
+    case "quiet":
+      return "Quiet";
+    case "stale":
+      return "Stale";
+    case "off":
+      return "Off";
+    case "unavailable":
+      return "Unavailable";
+  }
+}
+
+function chipTone(status: AudioPreflightTrackState["status"]): string {
+  switch (status) {
+    case "detected":
+      return "dot ok";
+    case "quiet":
+    case "stale":
+      return "warn";
+    case "unavailable":
+      return "danger";
+    default:
+      return "";
+  }
 }
 
 function LevelMeter({ level }: { level: number }) {

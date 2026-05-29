@@ -132,6 +132,153 @@ test("starts recording through the desktop API from the pre-recording screen", a
   expect(screen.getByText(/Both tracks live/)).toBeInTheDocument();
 });
 
+test("starts an audio preflight probe on the pre-recording screen", async () => {
+  const api = installApi({
+    startAudioProbe: vi.fn(async () => undefined),
+    stopAudioProbe: vi.fn(async () => undefined)
+  });
+  render(<App />);
+
+  fireEvent.click(screen.getAllByRole("button", { name: /New recording/ })[0]);
+
+  await waitFor(() => {
+    expect(api.startAudioProbe).toHaveBeenCalledWith({
+      audioSources: { system: true, microphone: true },
+      deviceIds: {}
+    });
+  });
+});
+
+test("uses only preflight level events for setup audio status", async () => {
+  let levelCallback: Parameters<NonNullable<MeetMapApi["onAudioLevel"]>>[0] | undefined;
+  installApi({
+    startAudioProbe: vi.fn(async () => undefined),
+    stopAudioProbe: vi.fn(async () => undefined),
+    onAudioLevel(callback) {
+      levelCallback = callback;
+      return () => undefined;
+    }
+  });
+  render(<App />);
+
+  fireEvent.click(screen.getAllByRole("button", { name: /New recording/ })[0]);
+  expect(screen.getByRole("button", { name: /Start recording/ })).toBeDisabled();
+
+  act(() => {
+    levelCallback?.({
+      track: "system",
+      level: 0.4,
+      occurredAt: new Date().toISOString(),
+      source: "recording"
+    });
+  });
+  expect(screen.getByRole("button", { name: /Start recording/ })).toBeDisabled();
+
+  act(() => {
+    levelCallback?.({
+      track: "system",
+      level: 0.4,
+      occurredAt: new Date().toISOString(),
+      source: "preflight"
+    });
+  });
+
+  expect(await screen.findByText(/System audio only/)).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /Start recording/ })).toBeEnabled();
+});
+
+test("blocks setup start until at least one selected source has preflight audio", async () => {
+  let levelCallback: Parameters<NonNullable<MeetMapApi["onAudioLevel"]>>[0] | undefined;
+  const api = installApi({
+    startAudioProbe: vi.fn(async () => undefined),
+    stopAudioProbe: vi.fn(async () => undefined),
+    onAudioLevel(callback) {
+      levelCallback = callback;
+      return () => undefined;
+    }
+  });
+  render(<App />);
+
+  fireEvent.click(screen.getAllByRole("button", { name: /New recording/ })[0]);
+  expect(screen.getByText(/No audio detected yet/)).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /Start recording/ })).toBeDisabled();
+
+  act(() => {
+    levelCallback?.({
+      track: "system",
+      level: 0.01,
+      occurredAt: new Date().toISOString(),
+      source: "preflight"
+    });
+    levelCallback?.({
+      track: "microphone",
+      level: 0.01,
+      occurredAt: new Date().toISOString(),
+      source: "preflight"
+    });
+  });
+  expect(screen.getByRole("button", { name: /Start recording/ })).toBeDisabled();
+
+  act(() => {
+    levelCallback?.({
+      track: "system",
+      level: 0.4,
+      occurredAt: new Date().toISOString(),
+      source: "preflight"
+    });
+  });
+
+  expect(await screen.findByText(/System audio only/)).toBeInTheDocument();
+  expect(screen.getByText(/No microphone input detected yet/)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: /Start recording/ }));
+
+  await waitFor(() => {
+    expect(api.startRecording).toHaveBeenCalled();
+  });
+});
+
+test("stops the preflight probe before creating a meeting", async () => {
+  let levelCallback: Parameters<NonNullable<MeetMapApi["onAudioLevel"]>>[0] | undefined;
+  const calls: string[] = [];
+  const api = installApi({
+    createMeeting: vi.fn(async () => {
+      calls.push("createMeeting");
+      return metadata();
+    }),
+    startAudioProbe: vi.fn(async () => undefined),
+    stopAudioProbe: vi.fn(async () => {
+      calls.push("stopAudioProbe");
+    }),
+    startRecording: vi.fn(async () => {
+      calls.push("startRecording");
+      return metadata({ status: "recording" });
+    }),
+    onAudioLevel(callback) {
+      levelCallback = callback;
+      return () => undefined;
+    }
+  });
+  render(<App />);
+
+  fireEvent.click(screen.getAllByRole("button", { name: /New recording/ })[0]);
+  act(() => {
+    levelCallback?.({
+      track: "microphone",
+      level: 0.4,
+      occurredAt: new Date().toISOString(),
+      source: "preflight"
+    });
+  });
+
+  expect(await screen.findByText(/Microphone only/)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: /Start recording/ }));
+
+  await waitFor(() => {
+    expect(api.startRecording).toHaveBeenCalled();
+  });
+  expect(calls).toEqual(["stopAudioProbe", "createMeeting", "startRecording"]);
+});
+
 test("passes one-sided pre-recording audio choices into recording startup", async () => {
   const api = installApi();
   render(<App />);
