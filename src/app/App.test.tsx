@@ -187,6 +187,71 @@ test("uses only preflight level events for setup audio status", async () => {
   expect(screen.getByRole("button", { name: /Start recording/ })).toBeEnabled();
 });
 
+test("renders setup input levels from preflight samples", async () => {
+  let levelCallback: Parameters<NonNullable<MeetMapApi["onAudioLevel"]>>[0] | undefined;
+  installApi({
+    startAudioProbe: vi.fn(async () => undefined),
+    stopAudioProbe: vi.fn(async () => undefined),
+    onAudioLevel(callback) {
+      levelCallback = callback;
+      return () => undefined;
+    }
+  });
+  render(<App />);
+
+  fireEvent.click(screen.getAllByRole("button", { name: /New recording/ })[0]);
+  expect(screen.queryByText("62%")).not.toBeInTheDocument();
+  expect(screen.queryByText("34%")).not.toBeInTheDocument();
+
+  act(() => {
+    levelCallback?.({
+      track: "system",
+      level: 0.4,
+      occurredAt: new Date().toISOString(),
+      source: "preflight"
+    });
+  });
+
+  expect(await screen.findByText(/^40%$/)).toBeInTheDocument();
+  expect(screen.getByText(/Peak 40%/)).toBeInTheDocument();
+});
+
+test("marks quiet selected setup sources as warnings without blocking one-sided audio", async () => {
+  let levelCallback: Parameters<NonNullable<MeetMapApi["onAudioLevel"]>>[0] | undefined;
+  installApi({
+    startAudioProbe: vi.fn(async () => undefined),
+    stopAudioProbe: vi.fn(async () => undefined),
+    onAudioLevel(callback) {
+      levelCallback = callback;
+      return () => undefined;
+    }
+  });
+  render(<App />);
+
+  fireEvent.click(screen.getAllByRole("button", { name: /New recording/ })[0]);
+  act(() => {
+    levelCallback?.({
+      track: "system",
+      level: 0.42,
+      occurredAt: new Date().toISOString(),
+      source: "preflight"
+    });
+    levelCallback?.({
+      track: "microphone",
+      level: 0.01,
+      occurredAt: new Date().toISOString(),
+      source: "preflight"
+    });
+  });
+
+  expect(await screen.findByText(/System audio only/)).toBeInTheDocument();
+  const microphoneCard = screen.getByText("Microphone").closest(".pre-audio-card");
+  expect(microphoneCard).toHaveClass("warning");
+  expect(within(microphoneCard as HTMLElement).getByText("Quiet")).toHaveClass("warn");
+  expect(screen.getByText(/No microphone input detected yet/)).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /Start recording/ })).toBeEnabled();
+});
+
 test("blocks setup start until at least one selected source has preflight audio", async () => {
   let levelCallback: Parameters<NonNullable<MeetMapApi["onAudioLevel"]>>[0] | undefined;
   const api = installApi({
