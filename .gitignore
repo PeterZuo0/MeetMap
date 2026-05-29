@@ -27,3 +27,4 @@ pnpm-debug.log*
 /exports/**/*.html
 meetings/**/*.docx
 meetings/**/*.html
+.superpowers/
