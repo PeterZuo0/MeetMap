@@ -59,6 +59,16 @@ export function createWindowsAudioCaptureProvider({
 
   return {
     async listDevices(): Promise<AudioCaptureDevice[]> {
+      const output: string[] = [];
+      const child = spawnCaptureHelper(helperPath, ["--list-devices"], spawn);
+      subscribeToOutput(child.stdout, output);
+      subscribeToOutput(child.stderr, output);
+      const exitCode = await waitForExit(child);
+
+      if (exitCode !== 0) {
+        throw createNativeExitError(exitCode, output);
+      }
+
       return [
         {
           id: "windows-default-system",
@@ -66,12 +76,7 @@ export function createWindowsAudioCaptureProvider({
           track: "system",
           isDefault: true
         },
-        {
-          id: "windows-default-microphone",
-          label: "Default Windows microphone",
-          track: "microphone",
-          isDefault: true
-        }
+        ...parseDeviceList(output.join(""))
       ];
     },
 
@@ -92,6 +97,10 @@ export function createWindowsAudioCaptureProvider({
       }
       if (request.tracks.microphone) {
         args.push("--microphone-output", request.tracks.microphone.filePath);
+        const microphoneDeviceNumber = parseMicrophoneDeviceId(request.tracks.microphone.deviceId);
+        if (microphoneDeviceNumber !== undefined) {
+          args.push("--microphone-device", String(microphoneDeviceNumber));
+        }
       }
       const output: string[] = [];
       const child = spawnCaptureHelper(helperPath, args, spawn);
@@ -254,6 +263,31 @@ function parseLevelLine(line: string): AudioLevelUpdate | null {
     level: Number(match[2]),
     occurredAt: new Date().toISOString()
   };
+}
+
+function parseDeviceList(output: string): AudioCaptureDevice[] {
+  const devices: AudioCaptureDevice[] = [];
+  for (const line of output.split(/\r?\n/)) {
+    const [marker, track, index, ...labelParts] = line.split("\t");
+    if (marker !== "DEVICE" || track !== "microphone" || !/^\d+$/.test(index)) {
+      continue;
+    }
+
+    const isDefault = devices.length === 0;
+    devices.push({
+      id: `microphone:${index}`,
+      label: labelParts.join("\t").trim() || `Microphone ${index}`,
+      track: "microphone",
+      ...(isDefault ? { isDefault: true } : {})
+    });
+  }
+
+  return devices;
+}
+
+function parseMicrophoneDeviceId(deviceId: string | undefined): number | undefined {
+  const match = /^microphone:(\d+)$/.exec(deviceId ?? "");
+  return match ? Number(match[1]) : undefined;
 }
 
 function waitForExit(process: WindowsAudioCaptureChildProcess): Promise<number | null> {

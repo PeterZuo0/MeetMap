@@ -28,6 +28,12 @@ internal static class Program
         return Success;
       }
 
+      if (args.Contains("--list-devices", StringComparer.OrdinalIgnoreCase))
+      {
+        PrintDevices();
+        return Success;
+      }
+
       var options = ParseOptions(args);
       await CaptureAsync(options);
       Console.WriteLine("Capture complete.");
@@ -319,6 +325,15 @@ internal static class Program
     };
   }
 
+  private static void PrintDevices()
+  {
+    for (var deviceNumber = 0; deviceNumber < WaveInEvent.DeviceCount; deviceNumber++)
+    {
+      var capabilities = WaveInEvent.GetCapabilities(deviceNumber);
+      Console.WriteLine($"DEVICE\tmicrophone\t{deviceNumber}\t{capabilities.ProductName}");
+    }
+  }
+
   private static Task CreateStoppedTask(IWaveIn capture)
   {
     var stopped = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -380,6 +395,7 @@ internal static class Program
       Optional:
         --duration-seconds <number>  Capture duration, defaults to 10
         --microphone-device <index>  NAudio WaveIn device index, defaults to 0
+        --list-devices               List available capture devices
         --wait-for-stdin-stop        Record until a "stop" line is received on stdin
         --help                       Show this help
       """;

@@ -451,6 +451,33 @@ test("starts an audio preflight probe with selected sources", async () => {
   }
 });
 
+test("passes selected microphone device id into preflight probe requests", async () => {
+  const baseDirectory = await mkdtemp(join(tmpdir(), "meetmap-recording-ipc-"));
+
+  try {
+    const requests: AudioCaptureStartRequest[] = [];
+    const store = createMeetingStore(baseDirectory);
+
+    registerRecordingIpc({
+      store,
+      createAudioCaptureProvider: () => createCapturingProvider(requests)
+    } as RecordingIpcContext);
+
+    await getHandler("recording:probe-start")(
+      createIpcEvent().event as never,
+      {
+        audioSources: { system: false, microphone: true },
+        deviceIds: { microphone: "microphone:1" }
+      } as never
+    );
+
+    expect(requests[0]?.tracks.microphone?.deviceId).toBe("microphone:1");
+    expect(requests[0]?.tracks.system).toBeUndefined();
+  } finally {
+    await rm(baseDirectory, { force: true, recursive: true });
+  }
+});
+
 test("forwards preflight level updates with a source marker", async () => {
   const baseDirectory = await mkdtemp(join(tmpdir(), "meetmap-recording-ipc-"));
 

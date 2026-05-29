@@ -116,7 +116,7 @@ export function PreRecordingScreen({
           subtitle="What you hear on this PC"
           trackState={audioPreflight.tracks.system}
           title="System audio"
-          deviceFallback="Default — Realtek HD Audio"
+          deviceFallback="Default Windows system audio"
           devices={devices.filter((device) => device.track === "system")}
           hint="Captured via WASAPI loopback. No virtual cable required."
           onDeviceChange={(deviceId) => onDeviceChange("system", deviceId)}
@@ -130,7 +130,7 @@ export function PreRecordingScreen({
           subtitle="What you say"
           trackState={audioPreflight.tracks.microphone}
           title="Microphone"
-          deviceFallback="Shure MV7 · USB"
+          deviceFallback="Default Windows microphone"
           devices={devices.filter((device) => device.track === "microphone")}
           hint="Speak now to check input level. Push-to-talk disabled."
           onDeviceChange={(deviceId) => onDeviceChange("microphone", deviceId)}
