@@ -124,9 +124,6 @@ export function App() {
     }
 
     let cancelled = false;
-    setPreflightLevels({});
-    setPreflightUnavailableTracks({});
-    setPreflightNow(new Date().toISOString());
     void api.startAudioProbe({
       audioSources: draftAudioSources,
       deviceIds: selectedAudioDeviceIds
@@ -159,10 +156,8 @@ export function App() {
   }, [
     api,
     phase,
-    draftAudioSources.system,
-    draftAudioSources.microphone,
-    selectedAudioDeviceIds.system,
-    selectedAudioDeviceIds.microphone
+    draftAudioSources,
+    selectedAudioDeviceIds
   ]);
 
   const crumbs = useMemo(() => {
@@ -200,6 +195,7 @@ export function App() {
     if (nextPhase === "pre") {
       setDraftOutputLanguage(settings.defaultOutputLanguage);
       setDraftAudioSources({ system: true, microphone: true });
+      resetPreflightState();
     }
     if (nextPhase === "settings") {
       setSettingsInitialSection("general");
@@ -348,6 +344,12 @@ export function App() {
     }
   }
 
+  function resetPreflightState() {
+    setPreflightLevels({});
+    setPreflightUnavailableTracks({});
+    setPreflightNow(new Date().toISOString());
+  }
+
   return (
     <div className="meetmap-root">
       <MeetMapShell
@@ -373,10 +375,14 @@ export function App() {
             onCancel={() => navigate("library")}
             onOutputLanguageChange={setDraftOutputLanguage}
             onSummaryStyleChange={setDraftSummaryStyle}
-            onAudioSourcesChange={setDraftAudioSources}
-            onDeviceChange={(track, deviceId) =>
-              setSelectedAudioDeviceIds((current) => ({ ...current, [track]: deviceId }))
-            }
+            onAudioSourcesChange={(sources) => {
+              resetPreflightState();
+              setDraftAudioSources(sources);
+            }}
+            onDeviceChange={(track, deviceId) => {
+              resetPreflightState();
+              setSelectedAudioDeviceIds((current) => ({ ...current, [track]: deviceId }));
+            }}
             onOpenPrivacySettings={() => openSettings("privacy")}
             onStart={() => void startRecording()}
             onTitleChange={setDraftTitle}
