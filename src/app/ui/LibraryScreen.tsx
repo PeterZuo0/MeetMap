@@ -153,7 +153,7 @@ export function LibraryScreen({
           onReprocessMeeting={onReprocessMeeting}
         />
       ) : (
-        <MeetingGrid lang={lang} meetings={filteredMeetings} onOpenMeeting={onOpenMeeting} />
+        <MeetingGrid meetings={filteredMeetings} onOpenMeeting={onOpenMeeting} />
       )}
 
       {filteredMeetings.length === 0 ? (
@@ -331,7 +331,7 @@ function MeetingMoreMenu({
   );
 }
 
-function MeetingGrid({ lang, meetings, onOpenMeeting }: { lang: UiLanguage; meetings: LibraryMeeting[]; onOpenMeeting(meetingId: string): void }) {
+function MeetingGrid({ meetings, onOpenMeeting }: { meetings: LibraryMeeting[]; onOpenMeeting(meetingId: string): void }) {
   return (
     <div className="meeting-card-grid" role="list" aria-label="Meeting grid">
       {meetings.map((meeting) => (

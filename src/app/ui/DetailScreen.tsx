@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { gsap } from "gsap";
 import type { MeetingActionItem, MeetingDecision, MeetingOpenQuestion, MeetingRisk, SourceReference } from "../../features/intelligence/meetingStructure";
@@ -664,16 +664,11 @@ function AudioPlayer({
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const barRefs = useRef<Array<HTMLSpanElement | null>>([]);
   const activeTrack = tracks.find((track) => track.track === selectedTrackId) ?? tracks[0] ?? null;
-  const peaks = activeTrack?.peaks.length ? activeTrack.peaks : [];
+  const activeTrackId = activeTrack?.track ?? null;
+  const peaks = useMemo(() => activeTrack?.peaks.length ? activeTrack.peaks : [], [activeTrack]);
   const safeDurationMs = Math.max(0, activeTrack?.durationMs ?? durationMs);
   const progress = safeDurationMs > 0 ? Math.max(0, Math.min(1, timeMs / safeDurationMs)) : 0;
   const playbackRates = [1, 1.25, 1.5, 2];
-
-  useEffect(() => {
-    if (!tracks.some((track) => track.track === selectedTrackId)) {
-      setSelectedTrackId(tracks[0]?.track ?? null);
-    }
-  }, [selectedTrackId, tracks]);
 
   useEffect(() => {
     if (audioRef.current) {
@@ -799,7 +794,7 @@ function AudioPlayer({
           aria-label={text(lang, "Audio track", "\u97f3\u9891\u8f68\u9053")}
           className="audio-track-select"
           onChange={(event) => selectTrack(event.target.value as AudioPlaybackTrack["track"])}
-          value={activeTrack?.track ?? ""}
+          value={activeTrackId ?? ""}
         >
           {tracks.map((track) => (
             <option key={track.track} value={track.track}>
@@ -908,7 +903,7 @@ function buildSpeakers(turns: TranscriptTurn[]): SpeakerSummary[] {
 }
 
 function buildTopicJumps(detailData: MeetingDetailData | null): TopicJump[] {
-  return (detailData?.structure?.topics ?? []).map((topic, index) => ({
+  return (detailData?.structure?.topics ?? []).map((topic) => ({
     time: formatDurationMs(firstSourceStart(topic.sourceRefs)),
     startTimeMs: firstSourceStart(topic.sourceRefs),
     title: topic.title

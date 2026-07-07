@@ -5,7 +5,7 @@ import { vi } from "vitest";
 import { createMeetingStore } from "../meetings/meetingStore";
 import type { MeetingMetadata } from "../meetings/meetingTypes";
 import type { TranscriptSegment } from "../transcription/transcriptionTypes";
-import { processMeeting } from "./postMeetingWorkflow";
+import { processMeeting, type PostMeetingWorkflowServices } from "./postMeetingWorkflow";
 
 async function pathExists(path: string): Promise<boolean> {
   try {
@@ -151,6 +151,50 @@ test("runs speaker diarization when enabled and persists speaker labels in trans
       }
     });
 
+    const services: PostMeetingWorkflowServices = {
+      async detectActivity() {
+        return {
+          tracksToProcess: ["system"],
+          outcome: "system-only",
+          reason: "system-track-contains-speech",
+          message: "System audio speech was detected without microphone speech."
+        };
+      },
+      async transcribe() {
+        return [
+          {
+            id: "seg-1",
+            trackId: "system",
+            startTimeMs: 1_000,
+            endTimeMs: 4_000,
+            text: "This segment should get a speaker label.",
+            language: "en",
+            confidence: 0.95
+          }
+        ];
+      },
+      diarize,
+      async extractStructure(transcript: TranscriptSegment[], metadata: MeetingMetadata) {
+        return {
+          metadata: {
+            meetingId: metadata.id,
+            title: metadata.title,
+            startedAt: metadata.timestamps.createdAt,
+            endedAt: metadata.timestamps.updatedAt,
+            sourceLanguage: "en",
+            outputLanguage: "en"
+          },
+          summary: transcript.map((segment) => `${segment.speakerLabel}: ${segment.text}`).join(" "),
+          topics: [],
+          decisions: [],
+          actionItems: [],
+          openQuestions: [],
+          risks: [],
+          relations: []
+        };
+      }
+    };
+
     await processMeeting({
       store,
       meetingId: meeting.id,
@@ -169,44 +213,7 @@ test("runs speaker diarization when enabled and persists speaker labels in trans
         uploadSeparateTracks: true,
         useOutputLanguage: true
       },
-      services: {
-        async detectActivity() {
-          return { tracksToProcess: ["system"], trackDecisions: [] };
-        },
-        async transcribe() {
-          return [
-            {
-              id: "seg-1",
-              trackId: "system",
-              startTimeMs: 1_000,
-              endTimeMs: 4_000,
-              text: "This segment should get a speaker label.",
-              language: "en",
-              confidence: 0.95
-            }
-          ];
-        },
-        diarize,
-        async extractStructure(transcript: TranscriptSegment[], metadata: MeetingMetadata) {
-          return {
-            metadata: {
-              meetingId: metadata.id,
-              title: metadata.title,
-              startedAt: metadata.timestamps.createdAt,
-              endedAt: metadata.timestamps.updatedAt,
-              sourceLanguage: "en",
-              outputLanguage: "en"
-            },
-            summary: transcript.map((segment) => `${segment.speakerLabel}: ${segment.text}`).join(" "),
-            topics: [],
-            decisions: [],
-            actionItems: [],
-            openQuestions: [],
-            risks: [],
-            relations: []
-          };
-        }
-      } as any
+      services
     });
 
     expect(diarize).toHaveBeenCalledWith(

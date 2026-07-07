@@ -53,26 +53,51 @@ export function RecordingScreen({
   onPauseChange(paused: boolean): void;
   onTagMoment?(moment: TaggedMomentInput): void;
 }) {
-  const [elapsed, setElapsed] = useState(() => getInitialElapsedSeconds(meeting));
-  const [taggedMoments, setTaggedMoments] = useState<TaggedMoment[]>([]);
+  const currentMeetingId = meeting?.id ?? null;
+  const [elapsedState, setElapsedState] = useState(() => ({
+    meetingId: currentMeetingId,
+    value: getInitialElapsedSeconds(meeting)
+  }));
+  const [taggedMomentState, setTaggedMomentState] = useState<{
+    meetingId: string | null;
+    moments: TaggedMoment[];
+  }>(() => ({
+    meetingId: currentMeetingId,
+    moments: []
+  }));
   const audioState = getRecordingAudioState(audioSources);
   const title = meeting?.title ?? "Untitled meeting";
   const systemStats = useMemo(() => createTrackStats(recordingLevels.system ?? []), [recordingLevels.system]);
   const microphoneStats = useMemo(() => createTrackStats(recordingLevels.microphone ?? []), [recordingLevels.microphone]);
-
-  useEffect(() => {
-    setElapsed(getInitialElapsedSeconds(meeting));
-    setTaggedMoments([]);
-  }, [meeting?.id]);
+  const elapsed = elapsedState.meetingId === currentMeetingId
+    ? elapsedState.value
+    : getInitialElapsedSeconds(meeting);
+  const taggedMoments = taggedMomentState.meetingId === currentMeetingId
+    ? taggedMomentState.moments
+    : [];
 
   useEffect(() => {
     if (isPaused) {
       return;
     }
 
-    const timer = window.setInterval(() => setElapsed((value) => value + 1), 1000);
+    const timer = window.setInterval(() => {
+      setElapsedState((current) => {
+        if (current.meetingId !== currentMeetingId) {
+          return {
+            meetingId: currentMeetingId,
+            value: getInitialElapsedSeconds(meeting)
+          };
+        }
+
+        return {
+          meetingId: current.meetingId,
+          value: current.value + 1
+        };
+      });
+    }, 1000);
     return () => window.clearInterval(timer);
-  }, [isPaused]);
+  }, [currentMeetingId, isPaused, meeting]);
 
   const elapsedText = formatElapsed(elapsed);
   const startedAtText = formatStartedAt(meeting);
@@ -84,10 +109,12 @@ export function RecordingScreen({
       microphoneStats,
       systemStats
     });
-    setTaggedMoments((current) => [
-      ...current,
-      nextMoment
-    ]);
+    setTaggedMomentState((current) => ({
+      meetingId: currentMeetingId,
+      moments: current.meetingId === currentMeetingId
+        ? [...current.moments, nextMoment]
+        : [nextMoment]
+    }));
     onTagMoment({
       elapsedMs: elapsed * 1000,
       level: nextMoment.level,
@@ -95,7 +122,7 @@ export function RecordingScreen({
       time: nextMoment.time,
       track: nextMoment.track
     });
-  }, [elapsed, elapsedText, microphoneStats, onTagMoment, systemStats, taggedMoments.length]);
+  }, [currentMeetingId, elapsed, elapsedText, microphoneStats, onTagMoment, systemStats, taggedMoments.length]);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {

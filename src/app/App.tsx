@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MeetingMetadata, ProcessingStep, SummaryStyle } from "../features/meetings/meetingTypes";
 import type { LanguageOptionValue } from "../features/settings/languageOptions";
 import type { ProcessingPreferences } from "../features/settings/processingPreferences";
@@ -32,10 +32,18 @@ import { WorkspaceScreen } from "./ui/WorkspaceScreen";
 
 export function App() {
   const api = window.meetMap;
+  const hasWorkspaceApi = Boolean(api?.getWorkspace);
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_APP_SETTINGS);
   const [phase, setPhase] = useState<WorkflowPhase>("library");
-  const [workspace, setWorkspace] = useState<WorkspaceState | null>(null);
-  const [isWorkspaceLoading, setIsWorkspaceLoading] = useState(true);
+  const [workspace, setWorkspace] = useState<WorkspaceState | null>(() => (
+    hasWorkspaceApi
+      ? null
+      : {
+          currentPath: "Local browser session",
+          recentPaths: []
+        }
+  ));
+  const [isWorkspaceLoading, setIsWorkspaceLoading] = useState(hasWorkspaceApi);
   const [isChoosingWorkspace, setIsChoosingWorkspace] = useState(false);
   const [settingsRuntimeStatus, setSettingsRuntimeStatus] = useState<SettingsRuntimeStatus | null>(null);
   const [libraryMeetings, setLibraryMeetings] = useState<MeetingMetadata[]>([]);
@@ -81,6 +89,15 @@ export function App() {
   const preflightProbeActiveRef = useRef(false);
   const meetingId = meeting?.id;
   const meetingStatus = meeting?.status;
+
+  const refreshLibraryMeetings = useCallback(async () => {
+    if (!api?.listMeetings) {
+      setLibraryMeetings([]);
+      return;
+    }
+
+    setLibraryMeetings(await api.listMeetings());
+  }, [api]);
 
   useEffect(() => {
     document.body.classList.toggle("theme-dark", settings.theme === "dark");
@@ -136,11 +153,6 @@ export function App() {
 
   useEffect(() => {
     if (!api?.getWorkspace) {
-      setWorkspace({
-        currentPath: "Local browser session",
-        recentPaths: []
-      });
-      setIsWorkspaceLoading(false);
       return;
     }
 
@@ -169,7 +181,7 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [api]);
+  }, [api, refreshLibraryMeetings]);
 
   useEffect(() => {
     if ((phase !== "pre" && phase !== "settings") || !api?.listAudioDevices) {
@@ -242,13 +254,12 @@ export function App() {
 
     const normalizedQuery = searchQuery.trim();
     if (normalizedQuery.length < 2) {
-      setSearchResults([]);
       return;
     }
 
     let cancelled = false;
-    setIsSearching(true);
     const timeoutId = window.setTimeout(() => {
+      setIsSearching(true);
       const searchPromise = api?.searchMeetings
         ? api.searchMeetings(normalizedQuery)
         : Promise.resolve(searchLocalMeetings(libraryMeetings, normalizedQuery));
@@ -373,6 +384,9 @@ export function App() {
     samples: api?.startAudioProbe ? preflightLevels : createFallbackPreflightSamples(draftAudioSources, preflightNow),
     unavailableTracks: preflightUnavailableTracks
   });
+  const searchHasEnoughInput = searchQuery.trim().length >= 2;
+  const visibleSearchResults = searchHasEnoughInput ? searchResults : [];
+  const visibleIsSearching = searchHasEnoughInput && isSearching;
 
   function navigate(nextPhase: WorkflowPhase) {
     if (nextPhase !== "workspace" && !workspace?.currentPath) {
@@ -677,15 +691,6 @@ export function App() {
     void processCurrentMeeting(meetingId);
   }
 
-  async function refreshLibraryMeetings() {
-    if (!api?.listMeetings) {
-      setLibraryMeetings([]);
-      return;
-    }
-
-    setLibraryMeetings(await api.listMeetings());
-  }
-
   async function chooseWorkspaceFolder() {
     if (!api?.chooseWorkspaceFolder) {
       setError("Workspace picker is unavailable in this runtime");
@@ -708,7 +713,7 @@ export function App() {
     }
   }
 
-  async function useWorkspaceFolder(folderPath: string) {
+  async function selectWorkspaceFolder(folderPath: string) {
     if (!api?.useWorkspaceFolder) {
       setError("Workspace picker is unavailable in this runtime");
       return;
@@ -792,7 +797,7 @@ export function App() {
             error={error}
             isChoosing={isChoosingWorkspace}
             onChooseFolder={() => void chooseWorkspaceFolder()}
-            onUseRecent={(folderPath) => void useWorkspaceFolder(folderPath)}
+            onUseRecent={(folderPath) => void selectWorkspaceFolder(folderPath)}
             workspace={workspace}
           />
         ) : null}
@@ -906,7 +911,7 @@ export function App() {
         ) : null}
         {isSearchOpen ? (
           <SearchOverlay
-            isSearching={isSearching}
+            isSearching={visibleIsSearching}
             onClose={() => setIsSearchOpen(false)}
             onOpenMeeting={(meetingId) => {
               setIsSearchOpen(false);
@@ -914,7 +919,7 @@ export function App() {
             }}
             onQueryChange={setSearchQuery}
             query={searchQuery}
-            results={searchResults}
+            results={visibleSearchResults}
           />
         ) : null}
       </MeetMapShell>

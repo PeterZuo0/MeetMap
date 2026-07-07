@@ -348,12 +348,19 @@ function getAudioFileExtension(track: AudioTrackMetadata): "m4a" | "wav" {
 }
 
 function createAudioExportDefaultName(title: string, extension: "m4a" | "wav"): string {
-  const baseName = title
-    .replace(/[<>:"/\\|?*\x00-\x1F]+/g, " ")
+  const baseName = replaceAllUnsafeFileNameCharacters(title)
     .replace(/\s+/g, " ")
     .trim() || "meeting-audio";
 
   return `${baseName}-audio.${extension}`;
+}
+
+function replaceAllUnsafeFileNameCharacters(value: string): string {
+  const reservedCharacters = '<>:"/\\|?*';
+  return Array.from(value, (character) => {
+    const code = character.charCodeAt(0);
+    return code <= 31 || reservedCharacters.includes(character) ? " " : character;
+  }).join("");
 }
 
 function runFfmpegAudioMix(inputPaths: string[], outputPath: string): Promise<void> {
