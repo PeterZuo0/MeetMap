@@ -90,7 +90,26 @@ describe("createOpenAiMeetingStructureClient", () => {
     expect(calls[0][0].input).toContain("We decided to keep the export workflow in scope.");
   });
 
-  test("passes output language preferences to the OpenAI structure prompt", async () => {
+  test("requests Chinese and English generated fields for bilingual output", async () => {
+    const calls: Parameters<OpenAiMeetingStructureRequester>[] = [];
+    const requester: OpenAiMeetingStructureRequester = async (openAiRequest) => {
+      calls.push([openAiRequest]);
+      return { outputJson: validStructure() };
+    };
+    const client = createOpenAiMeetingStructureClient({
+      apiKey: "test-key",
+      model: "gpt-4.1-mini",
+      requestStructure: requester
+    });
+
+    await client.extractStructure(request);
+
+    expect(calls[0]?.[0].instructions).toContain(
+      "For bilingual output, include both Chinese and English in every generated summary field"
+    );
+  });
+
+  test("always follows the selected output language for generated summaries", async () => {
     const calls: Parameters<OpenAiMeetingStructureRequester>[] = [];
     const requester: OpenAiMeetingStructureRequester = async (openAiRequest) => {
       calls.push([openAiRequest]);
@@ -108,11 +127,33 @@ describe("createOpenAiMeetingStructureClient", () => {
       useOutputLanguage: false
     });
 
-    expect(calls[0]?.[0].instructions).toContain("Do not force generated summary fields into the output language setting.");
-    expect(calls[0]?.[0].instructions).not.toContain("Write the final summary, topic titles, decisions, action items, questions, and risks in bilingual.");
+    expect(calls[0]?.[0].instructions).toContain(
+      "For bilingual output, include both Chinese and English in every generated summary field"
+    );
+    expect(calls[0]?.[0].instructions).toContain("Use the output language setting for generated summary fields.");
+    expect(calls[0]?.[0].instructions).not.toContain("Do not force generated summary fields into the output language setting.");
     expect(calls[0]?.[0].instructions).toContain("Normalize transcript language when useful instead of preserving original wording.");
     expect(calls[0]?.[0].input).toContain('"preserveTranscriptLanguage":false');
     expect(calls[0]?.[0].input).toContain('"useOutputLanguage":false');
+  });
+
+  test("uses explicit English and Chinese instructions for single-language outputs", async () => {
+    const calls: Parameters<OpenAiMeetingStructureRequester>[] = [];
+    const requester: OpenAiMeetingStructureRequester = async (openAiRequest) => {
+      calls.push([openAiRequest]);
+      return { outputJson: validStructure() };
+    };
+    const client = createOpenAiMeetingStructureClient({
+      apiKey: "test-key",
+      model: "gpt-4.1-mini",
+      requestStructure: requester
+    });
+
+    await client.extractStructure({ ...request, outputLanguage: "en" });
+    await client.extractStructure({ ...request, outputLanguage: "zh" });
+
+    expect(calls[0]?.[0].instructions).toContain("risks in English.");
+    expect(calls[1]?.[0].instructions).toContain("risks in Chinese.");
   });
 
   test("accepts JSON text responses from the provider boundary", async () => {

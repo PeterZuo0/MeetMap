@@ -55,6 +55,39 @@ describe("createOpenAiAudioTranscriptionRequester", () => {
     expect(init.body.get("file")).toBeInstanceOf(File);
   });
 
+  test("uses an M4A MIME type for M4A transcription uploads", async () => {
+    const calls: unknown[] = [];
+    const requester = createOpenAiAudioTranscriptionRequester({
+      async readFile() {
+        return new Uint8Array([1, 2, 3]);
+      },
+      async fetch(input, init) {
+        calls.push([input, init]);
+        return {
+          ok: true,
+          status: 200,
+          async json() {
+            return { text: "hello", language: "en" };
+          }
+        };
+      }
+    });
+
+    await requester({
+      apiKey: "test-key",
+      model: "gpt-4o-mini-transcribe",
+      filePath: "C:/meetings/1/audio/chunks/system-0000.m4a",
+      responseFormat: "json"
+    });
+
+    const [, init] = calls[0] as [
+      string,
+      { headers: Record<string, string>; body: FormData }
+    ];
+    const file = init.body.get("file") as File;
+    expect(file.name).toBe("system-0000.m4a");
+    expect(file.type).toBe("audio/mp4");
+  });
   test("includes optional transcription language and prompt hints in the request body", async () => {
     const calls: unknown[] = [];
     const requester = createOpenAiAudioTranscriptionRequester({

@@ -40,6 +40,8 @@ type ActiveCapture = {
 };
 
 const WAV_HEADER_BYTE_LENGTH = 44;
+const MIN_METER_DBFS = -45;
+const MAX_METER_DBFS = -10;
 
 export function createWindowsAudioCaptureProvider({
   helperPath = join(
@@ -260,9 +262,18 @@ function parseLevelLine(line: string): AudioLevelUpdate | null {
 
   return {
     track: match[1].toLowerCase() as "system" | "microphone",
-    level: Number(match[2]),
+    level: normalizeNativeRmsLevel(Number(match[2])),
     occurredAt: new Date().toISOString()
   };
+}
+
+function normalizeNativeRmsLevel(level: number): number {
+  if (!Number.isFinite(level) || level <= 0) {
+    return 0;
+  }
+
+  const dbfs = 20 * Math.log10(Math.min(1, level));
+  return Math.max(0, Math.min(1, (dbfs - MIN_METER_DBFS) / (MAX_METER_DBFS - MIN_METER_DBFS)));
 }
 
 function parseDeviceList(output: string): AudioCaptureDevice[] {

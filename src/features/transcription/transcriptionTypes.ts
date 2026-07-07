@@ -10,4 +10,6 @@ export type TranscriptSegment<TrackId extends AudioTrackId = AudioTrackId> = {
   text: string;
   language: string;
   confidence: number;
+  speakerId?: string;
+  speakerLabel?: string;
 };

@@ -74,19 +74,28 @@ export function createOpenAiMeetingStructureClient({
 function createInstructions(request: MeetingStructureRequest): string {
   return [
     "Extract a structured meeting summary from the transcript.",
-    request.useOutputLanguage === false
-      ? `Keep generated summary fields in the language that best matches the transcript content; do not force them into ${request.outputLanguage}.`
-      : `Write the final summary, topic titles, decisions, action items, questions, and risks in ${request.outputLanguage}.`,
+    request.outputLanguage === "bilingual"
+      ? "For bilingual output, include both Chinese and English in every generated summary field."
+      : `Write the final summary, topic titles, decisions, action items, questions, and risks in ${formatOutputLanguage(request.outputLanguage)}.`,
     `Use the requested summary style: ${formatSummaryStyle(request.summaryStyle)}.`,
-    request.useOutputLanguage === false
-      ? "Do not force generated summary fields into the output language setting."
-      : "Use the output language setting for generated summary fields.",
+    "Use the output language setting for generated summary fields.",
     request.preserveTranscriptLanguage === false
       ? "Normalize transcript language when useful instead of preserving original wording."
       : "Preserve the original transcript language where transcript wording is included.",
     "Preserve transcript source references by using the provided segment ids and timestamps.",
     "Return only JSON that matches the meeting_structure schema."
   ].join(" ");
+}
+
+function formatOutputLanguage(outputLanguage: MeetingStructureRequest["outputLanguage"]): string {
+  switch (outputLanguage) {
+    case "zh":
+      return "Chinese";
+    case "en":
+      return "English";
+    case "bilingual":
+      return "Chinese and English";
+  }
 }
 
 function createInput(request: MeetingStructureRequest): string {

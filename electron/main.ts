@@ -1,16 +1,19 @@
 import { app, BrowserWindow } from "electron";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { createMeetingStore } from "../src/features/meetings/meetingStore.js";
 import { registerMeetingIpc } from "./ipc/meetingIpc.js";
 import { registerRecordingIpc } from "./ipc/recordingIpc.js";
+import { registerSettingsIpc } from "./ipc/settingsIpc.js";
+import { registerWorkspaceIpc } from "./ipc/workspaceIpc.js";
 import { loadDotEnvFile } from "./envFile.js";
 import { resolveMainRuntimeConfig } from "./mainConfig.js";
+import { createWorkspaceManager } from "./workspaceManager.js";
+import { createWorkspaceMeetingStore } from "./workspaceMeetingStore.js";
+import { createSettingsManager } from "./settingsManager.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
-const meetingStore = createMeetingStore(path.join(app.getPath("userData"), "meetings"));
 
 function createMainWindow() {
   const window = new BrowserWindow({
@@ -57,6 +60,20 @@ app.whenReady().then(async () => {
     );
   }
 
+  const workspaceManager = createWorkspaceManager({
+    configPath: path.join(app.getPath("userData"), "workspace.json")
+  });
+  await workspaceManager.load();
+  const settingsManager = createSettingsManager({
+    applyOpenAtStartup: (openAtStartup) => app.setLoginItemSettings({ openAtLogin: openAtStartup }),
+    configPath: path.join(app.getPath("userData"), "settings.json"),
+    env: process.env
+  });
+  await settingsManager.load();
+  const meetingStore = createWorkspaceMeetingStore(workspaceManager);
+
+  registerSettingsIpc({ settingsManager });
+  registerWorkspaceIpc({ workspaceManager });
   registerMeetingIpc({
     store: meetingStore,
     ...runtimeConfig.meetingIpc

@@ -26,6 +26,19 @@ export const PROCESSING_STEP_VALUES = [
 
 export type ProcessingStep = (typeof PROCESSING_STEP_VALUES)[number];
 
+export type ProcessingProgressUpdate = {
+  meetingId: string;
+  step: ProcessingStep;
+  currentStep: number;
+  totalSteps: number;
+  percent: number;
+  updatedAt: string;
+  transcription?: {
+    completedChunks: number;
+    totalChunks: number;
+  };
+};
+
 export const AUDIO_TRACK_ID_VALUES = ["system", "microphone"] as const;
 
 export type AudioTrackId = (typeof AUDIO_TRACK_ID_VALUES)[number];
@@ -54,7 +67,7 @@ export type MeetingTimestamps = {
 export type AudioTrackMetadata<TrackId extends AudioTrackId = AudioTrackId> = {
   id: TrackId;
   filePath: string;
-  format: "wav";
+  format: "wav" | "m4a";
   hasAudio: boolean;
   sampleRateHz?: number;
   channelCount?: number;
@@ -79,6 +92,7 @@ export type MeetingPaths = {
   exportsDir: string;
   logsDir: string;
   transcriptPath: string;
+  diarizationPath: string;
   structurePath: string;
   wordExportPath: string;
   htmlMapExportPath: string;
@@ -94,6 +108,7 @@ export type MeetingMetadata = {
   timestamps: MeetingTimestamps;
   audioTracks: MeetingAudioTracks;
   transcriptPath: string | null;
+  diarizationPath?: string | null;
   structurePath: string | null;
   exportPaths: MeetingExportPaths;
 };

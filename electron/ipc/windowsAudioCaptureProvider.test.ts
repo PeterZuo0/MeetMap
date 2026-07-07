@@ -254,6 +254,30 @@ describe("createWindowsAudioCaptureProvider", () => {
     ]);
   });
 
+  test("maps native RMS level lines to perceptual meter levels", async () => {
+    const child = new FakeChildProcess();
+    const levels: Array<{ track: string; level: number }> = [];
+    const provider = createWindowsAudioCaptureProvider({
+      helperPath: "native.csproj",
+      spawn() {
+        return child;
+      },
+      async stat() {
+        return { size: 44 };
+      }
+    });
+    provider.onLevel((update) => levels.push({ track: update.track, level: update.level }));
+
+    await provider.start(systemOnlyRequest());
+    child.stdout.emit("data", Buffer.from("LEVEL system 0.0600\r\n"));
+    child.stdout.emit("data", Buffer.from("LEVEL system 0.0000\r\n"));
+
+    expect(levels).toEqual([
+      { track: "system", level: expect.closeTo(0.59, 2) },
+      { track: "system", level: 0 }
+    ]);
+  });
+
   test("starts published helper directly when an exe path is configured", async () => {
     const child = new FakeChildProcess();
     const spawnCalls: Parameters<WindowsAudioCaptureSpawn>[] = [];

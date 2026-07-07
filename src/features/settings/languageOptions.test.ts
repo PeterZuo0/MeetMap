@@ -10,20 +10,18 @@ test("defines stable language option values and labels", () => {
   expect(LANGUAGE_OPTIONS).toEqual([
     { value: "zh", label: "Chinese" },
     { value: "en", label: "English" },
-    { value: "bilingual", label: "Bilingual" },
-    { value: "auto", label: "Auto" }
+    { value: "bilingual", label: "Bilingual" }
   ]);
 
   expect(LANGUAGE_OPTION_LABELS).toEqual({
     zh: "Chinese",
     en: "English",
-    bilingual: "Bilingual",
-    auto: "Auto"
+    bilingual: "Bilingual"
   });
 });
 
-test("defaults to auto output language", () => {
-  expect(DEFAULT_LANGUAGE_OPTION).toBe("auto");
+test("defaults to bilingual output language", () => {
+  expect(DEFAULT_LANGUAGE_OPTION).toBe("bilingual");
 });
 
 test("looks up language options by value", () => {
@@ -33,7 +31,6 @@ test("looks up language options by value", () => {
     value: "bilingual",
     label: "Bilingual"
   });
-  expect(getLanguageOption("auto")).toEqual({ value: "auto", label: "Auto" });
 });
 
 test("parses external language option values", () => {

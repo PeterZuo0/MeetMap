@@ -134,7 +134,7 @@ export function assertProductionSmokeInputCanStart(
 export function parseProductionSmokeArgs(args: string[]): ProductionSmokeInput {
   const parsed: Partial<ProductionSmokeInput> = {
     allowCloudUpload: false,
-    outputLanguage: "auto"
+    outputLanguage: "bilingual"
   };
 
   for (let index = 0; index < args.length; index += 1) {
@@ -184,7 +184,7 @@ export function parseProductionSmokeArgs(args: string[]): ProductionSmokeInput {
     dataDir: requireParsedValue(parsed.dataDir, "--data-dir"),
     meetingId: requireParsedValue(parsed.meetingId, "--meeting-id"),
     microphoneAudioPath: parsed.microphoneAudioPath,
-    outputLanguage: parsed.outputLanguage ?? "auto",
+    outputLanguage: parsed.outputLanguage ?? "bilingual",
     summaryStyle: parsed.summaryStyle,
     systemAudioPath: parsed.systemAudioPath,
     title: requireParsedValue(parsed.title, "--title")

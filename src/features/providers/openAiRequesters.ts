@@ -56,14 +56,15 @@ export function createOpenAiAudioTranscriptionRequester(
     const audioFileBytes = new Uint8Array(audioBytes.byteLength);
     audioFileBytes.set(audioBytes);
     const formData = new FormData();
+    const audioMimeType = getAudioMimeType(request.filePath);
     const audioBlob = new Blob([audioFileBytes], {
-      type: "audio/wav"
+      type: audioMimeType
     });
 
     formData.set(
       "file",
       new File([audioBlob], basename(request.filePath), {
-        type: "audio/wav"
+        type: audioMimeType
       })
     );
     formData.set("model", request.model);
@@ -95,6 +96,18 @@ export function createOpenAiAudioTranscriptionRequester(
   };
 }
 
+function getAudioMimeType(filePath: string): string {
+  const lowerPath = filePath.toLowerCase();
+  if (lowerPath.endsWith(".m4a") || lowerPath.endsWith(".mp4")) {
+    return "audio/mp4";
+  }
+
+  if (lowerPath.endsWith(".mp3")) {
+    return "audio/mpeg";
+  }
+
+  return "audio/wav";
+}
 export function createOpenAiMeetingStructureRequester(
   dependencies: Pick<OpenAiRequesterDependencies, "fetch"> = {}
 ): OpenAiMeetingStructureRequester {

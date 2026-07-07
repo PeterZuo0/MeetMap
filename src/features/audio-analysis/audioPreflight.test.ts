@@ -34,20 +34,21 @@ describe("createAudioPreflightState", () => {
     expect(state.tracks.microphone.status).toBe("off");
   });
 
-  test("blocks start while enabled sources are still detecting", () => {
+  test("allows start while enabled sources are still detecting", () => {
     const state = createAudioPreflightState({
       enabledSources: { system: true, microphone: true },
       now: NOW,
       samples: {}
     });
 
-    expect(state.canStart).toBe(false);
+    expect(state.canStart).toBe(true);
+    expect(state.blockingReason).toBeNull();
     expect(state.summary).toBe("waiting");
     expect(state.tracks.system.status).toBe("detecting");
     expect(state.tracks.microphone.status).toBe("detecting");
   });
 
-  test("blocks start when enabled source samples are stale", () => {
+  test("allows start when enabled source samples are stale", () => {
     const state = createAudioPreflightState({
       enabledSources: { system: true, microphone: false },
       now: NOW,
@@ -56,7 +57,8 @@ describe("createAudioPreflightState", () => {
       }
     });
 
-    expect(state.canStart).toBe(false);
+    expect(state.canStart).toBe(true);
+    expect(state.blockingReason).toBeNull();
     expect(state.summary).toBe("waiting");
     expect(state.tracks.system.status).toBe("stale");
     expect(state.tracks.system.peakLevel).toBe(0);
@@ -77,6 +79,20 @@ describe("createAudioPreflightState", () => {
     expect(state.tracks.system.status).toBe("detected");
     expect(state.tracks.microphone.status).toBe("quiet");
     expect(state.tracks.microphone.message).toBe("No microphone input detected yet.");
+  });
+
+  test("allows start with low perceptual meter levels marked as quiet", () => {
+    const state = createAudioPreflightState({
+      enabledSources: { system: true, microphone: false },
+      now: NOW,
+      samples: {
+        system: [{ level: 0.14, occurredAt: "2026-05-29T00:00:09.000Z" }]
+      }
+    });
+
+    expect(state.canStart).toBe(true);
+    expect(state.blockingReason).toBeNull();
+    expect(state.tracks.system.status).toBe("quiet");
   });
 
   test("blocks start when selected sources are unavailable", () => {

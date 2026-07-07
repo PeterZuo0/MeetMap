@@ -1,7 +1,10 @@
-import { mkdtemp, rm, stat } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { vi } from "vitest";
 import { createMeetingStore } from "../meetings/meetingStore";
+import type { MeetingMetadata } from "../meetings/meetingTypes";
+import type { TranscriptSegment } from "../transcription/transcriptionTypes";
 import { processMeeting } from "./postMeetingWorkflow";
 
 async function pathExists(path: string): Promise<boolean> {
@@ -103,6 +106,124 @@ test("requires explicit workflow services unless demo mode is enabled", async ()
         meetingId: meeting.id
       })
     ).rejects.toThrow("Post-meeting workflow services must be configured");
+  } finally {
+    await rm(baseDirectory, { force: true, recursive: true });
+  }
+});
+
+test("runs speaker diarization when enabled and persists speaker labels in transcript", async () => {
+  const baseDirectory = await mkdtemp(join(tmpdir(), "meetmap-workflow-"));
+
+  try {
+    const store = createMeetingStore(baseDirectory);
+    const meeting = await store.createMeeting({
+      id: "workflow-diarization",
+      title: "Workflow Diarization",
+      outputLanguage: "en"
+    });
+    const paths = store.getMeetingPaths(meeting.id);
+    const diarize = vi.fn(async () => ({
+      engine: "test-diarizer",
+      device: "cpu",
+      speakers: [{ id: "speaker-1", label: "Speaker 1" }],
+      segments: [
+        {
+          id: "speaker-segment-1",
+          speakerId: "speaker-1",
+          speakerLabel: "Speaker 1",
+          startTimeMs: 900,
+          endTimeMs: 4_200,
+          confidence: 0.88
+        }
+      ]
+    }));
+
+    await store.writeMetadata({
+      ...meeting,
+      status: "recorded",
+      audioTracks: {
+        system: {
+          id: "system",
+          filePath: join(paths.audioDir, "system.wav"),
+          format: "wav",
+          hasAudio: true
+        }
+      }
+    });
+
+    await processMeeting({
+      store,
+      meetingId: meeting.id,
+      preferences: {
+        autoDeleteCloudCopies: true,
+        preserveTranscriptLanguage: true,
+        recognitionLanguages: {
+          cantonese: false,
+          englishGB: false,
+          englishUS: true,
+          mandarin: true,
+          mixedCodeSwitching: false
+        },
+        speakerDiarization: true,
+        uploadRecordedAudio: true,
+        uploadSeparateTracks: true,
+        useOutputLanguage: true
+      },
+      services: {
+        async detectActivity() {
+          return { tracksToProcess: ["system"], trackDecisions: [] };
+        },
+        async transcribe() {
+          return [
+            {
+              id: "seg-1",
+              trackId: "system",
+              startTimeMs: 1_000,
+              endTimeMs: 4_000,
+              text: "This segment should get a speaker label.",
+              language: "en",
+              confidence: 0.95
+            }
+          ];
+        },
+        diarize,
+        async extractStructure(transcript: TranscriptSegment[], metadata: MeetingMetadata) {
+          return {
+            metadata: {
+              meetingId: metadata.id,
+              title: metadata.title,
+              startedAt: metadata.timestamps.createdAt,
+              endedAt: metadata.timestamps.updatedAt,
+              sourceLanguage: "en",
+              outputLanguage: "en"
+            },
+            summary: transcript.map((segment) => `${segment.speakerLabel}: ${segment.text}`).join(" "),
+            topics: [],
+            decisions: [],
+            actionItems: [],
+            openQuestions: [],
+            risks: [],
+            relations: []
+          };
+        }
+      } as any
+    });
+
+    expect(diarize).toHaveBeenCalledWith(
+      expect.objectContaining({
+        meeting: expect.objectContaining({ id: meeting.id }),
+        tracksToProcess: ["system"]
+      })
+    );
+    await expect(pathExists(join(paths.meetingDir, "diarization.json"))).resolves.toBe(true);
+    await expect(store.readMetadata(meeting.id)).resolves.toMatchObject({
+      diarizationPath: join(paths.meetingDir, "diarization.json")
+    });
+    const transcript = JSON.parse(await readFile(paths.transcriptPath, "utf8"));
+    expect(transcript.segments[0]).toMatchObject({
+      speakerId: "speaker-1",
+      speakerLabel: "Speaker 1"
+    });
   } finally {
     await rm(baseDirectory, { force: true, recursive: true });
   }

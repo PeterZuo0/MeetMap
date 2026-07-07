@@ -1,17 +1,35 @@
 import type { MeetingStructure } from "../../intelligence/meetingStructure.js";
 import { resolveExportOptions, type ExportOptions } from "../exportOptions.js";
-import { assertValidMeetingGraph, buildMeetingGraph, type MeetingGraph } from "./graphModel.js";
+import {
+  assertValidMeetingGraph,
+  buildMeetingGraph,
+  enrichMeetingGraph,
+  type MeetingGraph
+} from "./graphModel.js";
 
 const GRAPH_DATA_TOKEN = "__MEETMAP_GRAPH_JSON__";
 
+export type HtmlMapAudioTrack = {
+  label: string;
+  mimeType: string;
+  dataUrl: string;
+};
+
 export function createHtmlMeetingMap(
   structure: MeetingStructure,
-  options?: ExportOptions
+  options?: ExportOptions,
+  audioTracks: HtmlMapAudioTrack[] = []
 ): string {
-  return createHtmlMeetingMapFromGraph(filterGraphForExportOptions(buildMeetingGraph(structure), options));
+  const resolvedOptions = resolveExportOptions(options);
+  const graph = filterGraphForExportOptions(buildMeetingGraph(structure), resolvedOptions);
+  return createHtmlMeetingMapFromGraph(
+    resolvedOptions.audio && audioTracks.length > 0
+      ? { ...graph, audioTracks }
+      : graph
+  );
 }
 
-export function createHtmlMeetingMapFromGraph(graph: MeetingGraph): string {
+export function createHtmlMeetingMapFromGraph(graph: MeetingGraph & { audioTracks?: HtmlMapAudioTrack[] }): string {
   assertValidMeetingGraph(graph);
   return HTML_TEMPLATE.replace(GRAPH_DATA_TOKEN, serializeForHtml(graph));
 }
@@ -60,8 +78,10 @@ function filterGraphForExportOptions(graph: MeetingGraph, options?: ExportOption
     });
   const nodeIds = new Set(nodes.map((node) => node.id));
   return {
-    nodes,
-    edges: graph.edges.filter((edge) => nodeIds.has(edge.fromId) && nodeIds.has(edge.toId))
+    ...enrichMeetingGraph({
+      nodes,
+      edges: graph.edges.filter((edge) => nodeIds.has(edge.fromId) && nodeIds.has(edge.toId))
+    })
   };
 }
 
@@ -74,20 +94,20 @@ const HTML_TEMPLATE = String.raw`<!doctype html>
     <style>
       :root {
         color-scheme: light;
-        --background: #f8fafc;
-        --surface: #ffffff;
-        --ink: #111827;
-        --muted: #64748b;
-        --line: #cbd5e1;
-        --hierarchy: #94a3b8;
-        --relation: #f97316;
-        --meeting: #2563eb;
-        --topic: #0f766e;
-        --point: #475569;
-        --decision: #7c3aed;
-        --action: #15803d;
-        --question: #ca8a04;
-        --risk: #dc2626;
+        --background: #f8f7f4;
+        --surface: #fffefb;
+        --surface-strong: #f0efe9;
+        --ink: #171717;
+        --muted: #6b665d;
+        --line: #ddd7cc;
+        --accent: #6266e8;
+        --meeting: #111827;
+        --topic: #6266e8;
+        --point: #607089;
+        --decision: #12805c;
+        --action: #b15c00;
+        --question: #8a5a00;
+        --risk: #c43b2f;
       }
 
       * {
@@ -103,139 +123,260 @@ const HTML_TEMPLATE = String.raw`<!doctype html>
           Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       }
 
+      button,
+      input {
+        font: inherit;
+      }
+
       .app {
         display: grid;
-        grid-template-columns: minmax(0, 1fr) 320px;
+        grid-template-columns: minmax(0, 1fr) 340px;
         min-height: 100vh;
+      }
+
+      .workspace {
+        display: grid;
+        grid-template-rows: auto minmax(0, 1fr);
+        min-width: 0;
+      }
+
+      .toolbar {
+        display: grid;
+        grid-template-columns: minmax(220px, 1fr) auto auto;
+        align-items: center;
+        gap: 12px;
+        min-height: 64px;
+        padding: 14px 18px;
+        border-bottom: 1px solid var(--line);
+        background: rgba(255, 254, 251, 0.92);
+        backdrop-filter: blur(12px);
+      }
+
+      .audio-export {
+        display: grid;
+        gap: 8px;
+        padding: 12px 18px;
+        border-bottom: 1px solid var(--line);
+        background: var(--surface);
+      }
+
+      .audio-export[hidden] {
+        display: none;
+      }
+
+      .audio-export strong {
+        font-size: 12px;
+      }
+
+      .audio-export audio {
+        width: 100%;
+        height: 34px;
+      }
+
+      .search {
+        width: 100%;
+        height: 36px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--surface);
+        color: var(--ink);
+        padding: 0 12px;
+      }
+
+      .filters,
+      .zoom {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+      }
+
+      .chip,
+      .icon-button {
+        height: 34px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--surface);
+        color: var(--ink);
+        cursor: pointer;
+      }
+
+      .chip {
+        padding: 0 10px;
+        font-size: 12px;
+      }
+
+      .chip[aria-pressed="true"] {
+        border-color: var(--accent);
+        background: #eef2ff;
+        color: #3730a3;
+      }
+
+      .icon-button {
+        width: 34px;
+        font-weight: 700;
       }
 
       .map {
         position: relative;
-        min-height: 100vh;
-        overflow: auto;
-        padding: 40px;
+        min-height: 0;
+        overflow: hidden;
       }
 
-      .canvas {
-        position: relative;
-        min-width: 980px;
-        min-height: 720px;
-      }
-
-      .edge-layer {
-        position: absolute;
-        inset: 0;
+      .graph {
+        display: block;
         width: 100%;
-        height: 100%;
-        pointer-events: none;
+        height: calc(100vh - 64px);
+        min-height: 620px;
+        background:
+          radial-gradient(circle at center, rgba(98, 102, 232, 0.08), transparent 32%),
+          linear-gradient(var(--background), var(--background));
+        cursor: grab;
+      }
+
+      .graph:active {
+        cursor: grabbing;
       }
 
       .edge {
         fill: none;
         stroke-linecap: round;
+        transition: opacity 160ms ease, stroke-width 160ms ease;
       }
 
       .edge.hierarchy {
-        stroke: var(--hierarchy);
-        stroke-width: 2;
+        stroke: #a8a198;
       }
 
       .edge.relation {
-        stroke: var(--relation);
-        stroke-width: 2.5;
-        stroke-dasharray: 8 7;
+        stroke: var(--accent);
       }
 
       .node {
-        position: absolute;
-        width: 190px;
-        min-height: 72px;
-        border: 1px solid var(--line);
-        border-left: 6px solid var(--point);
-        border-radius: 8px;
-        background: var(--surface);
-        box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
-        color: var(--ink);
         cursor: pointer;
-        padding: 12px;
-        text-align: left;
+        transition: opacity 160ms ease;
       }
 
-      .node:hover,
-      .node:focus {
-        outline: 3px solid rgba(37, 99, 235, 0.22);
+      .node circle {
+        fill: var(--surface);
+        stroke: currentColor;
+        stroke-width: 2;
+        filter: drop-shadow(0 8px 14px rgba(23, 23, 23, 0.12));
       }
 
       .node[data-type="meeting"] {
-        border-left-color: var(--meeting);
-        width: 230px;
+        color: var(--meeting);
+      }
+
+      .node[data-type="meeting"] circle {
+        fill: var(--meeting);
       }
 
       .node[data-type="topic"] {
-        border-left-color: var(--topic);
+        color: var(--topic);
+      }
+
+      .node[data-type="point"] {
+        color: var(--point);
       }
 
       .node[data-type="decision"] {
-        border-left-color: var(--decision);
+        color: var(--decision);
       }
 
       .node[data-type="action"] {
-        border-left-color: var(--action);
+        color: var(--action);
       }
 
       .node[data-type="question"] {
-        border-left-color: var(--question);
+        color: var(--question);
       }
 
       .node[data-type="risk"] {
-        border-left-color: var(--risk);
+        color: var(--risk);
       }
 
-      .node-title {
-        display: block;
-        margin-bottom: 6px;
-        font-size: 14px;
-        font-weight: 700;
-        overflow-wrap: anywhere;
-      }
-
-      .node-body {
-        display: -webkit-box;
-        color: var(--muted);
+      .node text {
+        fill: var(--ink);
         font-size: 12px;
-        line-height: 1.4;
-        overflow: hidden;
-        -webkit-box-orient: vertical;
-        -webkit-line-clamp: 3;
+        font-weight: 700;
+        text-anchor: middle;
+        pointer-events: none;
+      }
+
+      .node[data-type="meeting"] text {
+        fill: #ffffff;
+      }
+
+      .node .type-label {
+        font-size: 10px;
+        font-weight: 600;
+        opacity: 0.72;
+        text-transform: uppercase;
+      }
+
+      .node.dimmed,
+      .edge.dimmed {
+        opacity: 0.14;
+      }
+
+      .node.hidden,
+      .edge.hidden {
+        display: none;
+      }
+
+      .node.selected circle {
+        stroke-width: 4;
+      }
+
+      .empty-state {
+        position: absolute;
+        inset: 0;
+        display: none;
+        place-items: center;
+        color: var(--muted);
+        pointer-events: none;
+      }
+
+      .empty-state.visible {
+        display: grid;
       }
 
       .details {
         border-left: 1px solid var(--line);
         background: var(--surface);
-        padding: 28px;
+        padding: 24px;
+        overflow: auto;
       }
 
       .details h1 {
-        margin: 0 0 6px;
+        margin: 0 0 8px;
         font-size: 20px;
+        line-height: 1.2;
       }
 
       .type {
+        display: inline-flex;
+        align-items: center;
+        height: 24px;
         margin: 0 0 18px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        padding: 0 10px;
         color: var(--muted);
-        font-size: 13px;
+        font-size: 12px;
         text-transform: capitalize;
       }
 
       .body {
-        line-height: 1.55;
+        margin: 0;
+        line-height: 1.6;
       }
 
       dl {
         display: grid;
         grid-template-columns: max-content 1fr;
         gap: 8px 12px;
-        margin-top: 22px;
+        margin: 22px 0 0;
         font-size: 13px;
       }
 
@@ -245,120 +386,323 @@ const HTML_TEMPLATE = String.raw`<!doctype html>
 
       dd {
         margin: 0;
+        overflow-wrap: anywhere;
       }
 
-      @media (max-width: 900px) {
+      .related {
+        margin-top: 24px;
+      }
+
+      .related h2 {
+        margin: 0 0 10px;
+        color: var(--muted);
+        font-size: 11px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .related button {
+        display: block;
+        width: 100%;
+        margin: 0 0 8px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--surface-strong);
+        color: var(--ink);
+        padding: 9px 10px;
+        cursor: pointer;
+        text-align: left;
+      }
+
+      @media (max-width: 980px) {
         .app {
           grid-template-columns: 1fr;
         }
 
-        .map {
-          min-height: 70vh;
-          padding: 20px;
+        .toolbar {
+          grid-template-columns: 1fr;
+          align-items: stretch;
+        }
+
+        .filters,
+        .zoom {
+          flex-wrap: wrap;
+        }
+
+        .graph {
+          height: 70vh;
         }
 
         .details {
           border-left: 0;
           border-top: 1px solid var(--line);
+          max-height: 44vh;
         }
       }
     </style>
   </head>
   <body>
     <script id="meetmap-graph-data" type="application/json">__MEETMAP_GRAPH_JSON__</script>
-    <main class="app">
-      <section class="map" aria-label="Meeting map">
-        <div class="canvas" id="canvas">
-          <svg class="edge-layer" id="edge-layer" aria-hidden="true"></svg>
+    <main class="app" data-layout="force-radial">
+      <section class="workspace" aria-label="Meeting map workspace">
+        <div class="toolbar">
+          <input id="graph-search" class="search" type="search" placeholder="Search nodes..." aria-label="Search graph nodes" />
+          <div class="filters" aria-label="Filter node types">
+            <button class="chip" type="button" data-filter-type="topic" aria-pressed="true">Topics</button>
+            <button class="chip" type="button" data-filter-type="decision" aria-pressed="true">Decisions</button>
+            <button class="chip" type="button" data-filter-type="action" aria-pressed="true">Actions</button>
+            <button class="chip" type="button" data-filter-type="question" aria-pressed="true">Questions</button>
+            <button class="chip" type="button" data-filter-type="risk" aria-pressed="true">Risks</button>
+          </div>
+          <div class="zoom" aria-label="Zoom controls">
+            <button class="icon-button" type="button" data-zoom-action="out" aria-label="Zoom out">-</button>
+            <button class="icon-button" type="button" data-zoom-action="reset" aria-label="Reset view">1:1</button>
+            <button class="icon-button" type="button" data-zoom-action="in" aria-label="Zoom in">+</button>
+          </div>
+        </div>
+        <div id="audio-export" class="audio-export" hidden></div>
+        <div class="map">
+          <svg class="graph" id="graph" role="img" aria-label="Force-directed meeting structure map">
+            <g id="viewport">
+              <g id="edge-layer"></g>
+              <g id="node-layer"></g>
+            </g>
+          </svg>
+          <div id="empty-state" class="empty-state">No matching nodes</div>
         </div>
       </section>
       <aside class="details" id="details" aria-live="polite"></aside>
     </main>
     <script>
       const graph = JSON.parse(document.getElementById("meetmap-graph-data").textContent);
-      const canvas = document.getElementById("canvas");
+      const svg = document.getElementById("graph");
+      const viewport = document.getElementById("viewport");
       const edgeLayer = document.getElementById("edge-layer");
+      const nodeLayer = document.getElementById("node-layer");
       const details = document.getElementById("details");
-      const positions = new Map();
+      const searchInput = document.getElementById("graph-search");
+      const emptyState = document.getElementById("empty-state");
+      const audioExport = document.getElementById("audio-export");
       const nodeById = new Map(graph.nodes.map((node) => [node.id, node]));
+      const adjacency = buildAdjacency();
+      const activeTypes = new Set(["topic", "decision", "action", "question", "risk"]);
+      const state = { scale: 1, tx: 0, ty: 0, selectedId: graph.nodes[0]?.id ?? null, query: "" };
 
-      function layout() {
-        const meeting = graph.nodes.find((node) => node.type === "meeting");
+      function renderEmbeddedAudio() {
+        const tracks = Array.isArray(graph.audioTracks) ? graph.audioTracks : [];
+        if (!tracks.length) return;
+        audioExport.hidden = false;
+        tracks.forEach((track) => {
+          const wrapper = document.createElement("div");
+          const label = document.createElement("strong");
+          label.textContent = track.label;
+          const audio = document.createElement("audio");
+          audio.controls = true;
+          audio.preload = "metadata";
+          audio.src = track.dataUrl;
+          wrapper.append(label, audio);
+          audioExport.appendChild(wrapper);
+        });
+      }
+
+      function buildAdjacency() {
+        const map = new Map(graph.nodes.map((node) => [node.id, new Set()]));
+        graph.edges.forEach((edge) => {
+          map.get(edge.fromId)?.add(edge.toId);
+          map.get(edge.toId)?.add(edge.fromId);
+        });
+        return map;
+      }
+
+      function runForceLayout() {
+        const width = Math.max(svg.clientWidth || 1100, 760);
+        const height = Math.max(svg.clientHeight || 720, 560);
+        const centerX = width / 2;
+        const centerY = height / 2;
         const topics = graph.nodes.filter((node) => node.type === "topic");
-        const centerX = 490;
-        const centerY = 320;
+        const communityIndex = new Map(topics.map((node, index) => [node.id, index]));
+        const communityCount = Math.max(topics.length, 1);
 
-        if (meeting) {
-          positions.set(meeting.id, { x: centerX - 115, y: centerY - 40, width: 230, height: 92 });
+        graph.nodes.forEach((node, index) => {
+          const radius = node.type === "meeting" ? 0 : node.type === "topic" ? 190 : 290;
+          const community = communityIndex.get(node.community) ?? index % communityCount;
+          const angle = node.type === "meeting"
+            ? 0
+            : (Math.PI * 2 * community) / communityCount + (index % 5 - 2) * 0.22;
+          node.x = centerX + Math.cos(angle) * radius;
+          node.y = centerY + Math.sin(angle) * radius;
+          node.vx = 0;
+          node.vy = 0;
+        });
+
+        for (let step = 0; step < 150; step += 1) {
+          applyRepulsion();
+          applyEdges();
+          applyRadialGravity(centerX, centerY, communityIndex, communityCount);
+          graph.nodes.forEach((node) => {
+            if (node.type === "meeting") {
+              node.x = centerX;
+              node.y = centerY;
+              node.vx = 0;
+              node.vy = 0;
+              return;
+            }
+            node.vx *= 0.72;
+            node.vy *= 0.72;
+            node.x += node.vx;
+            node.y += node.vy;
+          });
+        }
+      }
+
+      function applyRepulsion() {
+        for (let i = 0; i < graph.nodes.length; i += 1) {
+          for (let j = i + 1; j < graph.nodes.length; j += 1) {
+            const a = graph.nodes[i];
+            const b = graph.nodes[j];
+            const dx = a.x - b.x || 0.01;
+            const dy = a.y - b.y || 0.01;
+            const distanceSq = Math.max(dx * dx + dy * dy, 1200);
+            const force = 1800 / distanceSq;
+            a.vx += dx * force;
+            a.vy += dy * force;
+            b.vx -= dx * force;
+            b.vy -= dy * force;
+          }
+        }
+      }
+
+      function applyEdges() {
+        graph.edges.forEach((edge) => {
+          const from = nodeById.get(edge.fromId);
+          const to = nodeById.get(edge.toId);
+          if (!from || !to) return;
+          const dx = to.x - from.x;
+          const dy = to.y - from.y;
+          const distance = Math.max(Math.hypot(dx, dy), 1);
+          const target = edge.explicit ? 170 : 130;
+          const force = ((distance - target) / distance) * 0.012 * (edge.weight ?? 1);
+          const fx = dx * force;
+          const fy = dy * force;
+          if (from.type !== "meeting") {
+            from.vx += fx;
+            from.vy += fy;
+          }
+          if (to.type !== "meeting") {
+            to.vx -= fx;
+            to.vy -= fy;
+          }
+        });
+      }
+
+      function applyRadialGravity(centerX, centerY, communityIndex, communityCount) {
+        graph.nodes.forEach((node, index) => {
+          if (node.type === "meeting") return;
+          const community = communityIndex.get(node.community) ?? index % communityCount;
+          const angle = (Math.PI * 2 * community) / communityCount;
+          const radius = node.type === "topic" ? 205 : 315;
+          const targetX = centerX + Math.cos(angle) * radius;
+          const targetY = centerY + Math.sin(angle) * radius;
+          node.vx += (targetX - node.x) * 0.006;
+          node.vy += (targetY - node.y) * 0.006;
+        });
+      }
+
+      function renderGraph() {
+        edgeLayer.innerHTML = "";
+        nodeLayer.innerHTML = "";
+        graph.edges.forEach(renderEdge);
+        graph.nodes.forEach(renderNode);
+        applyVisibility();
+        renderDetails(state.selectedId ? nodeById.get(state.selectedId) : graph.nodes[0]);
+      }
+
+      function renderEdge(edge) {
+        const from = nodeById.get(edge.fromId);
+        const to = nodeById.get(edge.toId);
+        if (!from || !to) return;
+        const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        const midX = (from.x + to.x) / 2;
+        const midY = (from.y + to.y) / 2;
+        const curve = edge.explicit ? 42 : 18;
+        const dx = to.x - from.x;
+        const dy = to.y - from.y;
+        const length = Math.max(Math.hypot(dx, dy), 1);
+        const normalX = (-dy / length) * curve;
+        const normalY = (dx / length) * curve;
+        path.setAttribute("d", "M " + from.x + " " + from.y + " Q " + (midX + normalX) + " " + (midY + normalY) + " " + to.x + " " + to.y);
+        path.setAttribute("class", "edge " + (edge.explicit ? "relation" : "hierarchy"));
+        path.setAttribute("data-edge-id", edge.id);
+        path.setAttribute("data-from-id", edge.fromId);
+        path.setAttribute("data-to-id", edge.toId);
+        path.setAttribute("stroke-width", String((edge.explicit ? 1.6 : 1) + (edge.weight ?? 1) * 0.7));
+        path.setAttribute("opacity", edge.explicit ? "0.72" : "0.48");
+        const title = document.createElementNS("http://www.w3.org/2000/svg", "title");
+        title.textContent = edge.type;
+        path.appendChild(title);
+        edgeLayer.appendChild(path);
+      }
+
+      function renderNode(node) {
+        const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
+        group.setAttribute("class", "node");
+        group.setAttribute("tabindex", "0");
+        group.setAttribute("role", "button");
+        group.setAttribute("data-node-id", node.id);
+        group.setAttribute("data-type", node.type);
+        group.setAttribute("transform", "translate(" + node.x + " " + node.y + ")");
+        group.addEventListener("click", () => selectNode(node.id));
+        group.addEventListener("keydown", (event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            selectNode(node.id);
+          }
+        });
+        group.addEventListener("mouseenter", () => highlightNeighborhood(node.id));
+        group.addEventListener("mouseleave", () => highlightNeighborhood(null));
+
+        const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+        circle.setAttribute("r", String(node.radius ?? 18));
+        group.appendChild(circle);
+
+        const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+        label.setAttribute("y", node.type === "meeting" ? "4" : "-2");
+        label.textContent = compactText(node.type === "meeting" ? node.title : node.body || node.title, node.type === "meeting" ? 18 : 16);
+        group.appendChild(label);
+
+        if (node.type !== "meeting") {
+          const typeLabel = document.createElementNS("http://www.w3.org/2000/svg", "text");
+          typeLabel.setAttribute("class", "type-label");
+          typeLabel.setAttribute("y", String((node.radius ?? 18) + 17));
+          typeLabel.textContent = node.type;
+          group.appendChild(typeLabel);
         }
 
-        topics.forEach((topic, index) => {
-          const side = index % 2 === 0 ? -1 : 1;
-          const rank = Math.floor(index / 2);
-          const topicX = centerX + side * 310 - 95;
-          const topicY = 120 + rank * 230;
-          positions.set(topic.id, { x: topicX, y: topicY, width: 190, height: 88 });
-
-          const children = graph.nodes.filter((node) => node.parentId === topic.id);
-          children.forEach((child, childIndex) => {
-            positions.set(child.id, {
-              x: topicX + side * 210,
-              y: topicY + childIndex * 102,
-              width: 190,
-              height: 82
-            });
-          });
-        });
-
-        const orphans = graph.nodes.filter(
-          (node) => node.type !== "meeting" && node.type !== "topic" && !node.parentId
-        );
-        orphans.forEach((node, index) => {
-          positions.set(node.id, { x: centerX - 95, y: 520 + index * 102, width: 190, height: 82 });
-        });
+        const title = document.createElementNS("http://www.w3.org/2000/svg", "title");
+        title.textContent = node.title + ": " + node.body;
+        group.appendChild(title);
+        nodeLayer.appendChild(group);
       }
 
-      function renderNodes() {
-        graph.nodes.forEach((node) => {
-          const position = positions.get(node.id);
-          if (!position) return;
-          const button = document.createElement("button");
-          button.className = "node";
-          button.dataset.type = node.type;
-          button.style.left = position.x + "px";
-          button.style.top = position.y + "px";
-          button.style.width = position.width + "px";
-          button.innerHTML =
-            '<span class="node-title"></span><span class="node-body"></span>';
-          button.querySelector(".node-title").textContent = node.title;
-          button.querySelector(".node-body").textContent = node.body;
-          button.addEventListener("click", () => renderDetails(node));
-          canvas.appendChild(button);
-        });
+      function compactText(text, maxLength) {
+        const value = String(text || "");
+        return value.length > maxLength ? value.slice(0, maxLength - 1) + "..." : value;
       }
 
-      function renderEdges() {
-        edgeLayer.setAttribute("viewBox", "0 0 " + canvas.scrollWidth + " " + canvas.scrollHeight);
-        graph.edges.forEach((edge) => {
-          const from = positions.get(edge.fromId);
-          const to = positions.get(edge.toId);
-          if (!from || !to) return;
-          const fromX = from.x + from.width / 2;
-          const fromY = from.y + from.height / 2;
-          const toX = to.x + to.width / 2;
-          const toY = to.y + to.height / 2;
-          const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-          const midX = (fromX + toX) / 2;
-          path.setAttribute("d", "M " + fromX + " " + fromY + " C " + midX + " " + fromY + ", " + midX + " " + toY + ", " + toX + " " + toY);
-          path.setAttribute("class", "edge " + (edge.explicit ? "relation" : "hierarchy"));
-          path.appendChild(document.createElementNS("http://www.w3.org/2000/svg", "title")).textContent = edge.type;
-          edgeLayer.appendChild(path);
+      function selectNode(nodeId) {
+        state.selectedId = nodeId;
+        document.querySelectorAll(".node").forEach((element) => {
+          element.classList.toggle("selected", element.getAttribute("data-node-id") === nodeId);
         });
+        renderDetails(nodeById.get(nodeId));
       }
 
       function renderDetails(node) {
-        const metadata = Object.entries(node.metadata || {});
         details.innerHTML = "";
+        if (!node) {
+          details.textContent = "No meeting map data.";
+          return;
+        }
         const heading = document.createElement("h1");
         heading.textContent = node.title;
         const type = document.createElement("p");
@@ -369,6 +713,7 @@ const HTML_TEMPLATE = String.raw`<!doctype html>
         body.textContent = node.body;
         details.append(heading, type, body);
 
+        const metadata = Object.entries(node.metadata || {});
         if (metadata.length > 0) {
           const list = document.createElement("dl");
           metadata.forEach(([key, value]) => {
@@ -380,12 +725,128 @@ const HTML_TEMPLATE = String.raw`<!doctype html>
           });
           details.appendChild(list);
         }
+
+        const relatedIds = Array.from(adjacency.get(node.id) || []);
+        if (relatedIds.length > 0) {
+          const related = document.createElement("section");
+          related.className = "related";
+          const relatedHeading = document.createElement("h2");
+          relatedHeading.textContent = "Related";
+          related.appendChild(relatedHeading);
+          relatedIds
+            .map((id) => nodeById.get(id))
+            .filter(Boolean)
+            .forEach((relatedNode) => {
+              const button = document.createElement("button");
+              button.type = "button";
+              button.textContent = relatedNode.type + " - " + relatedNode.title;
+              button.addEventListener("click", () => selectNode(relatedNode.id));
+              related.appendChild(button);
+            });
+          details.appendChild(related);
+        }
       }
 
-      layout();
-      renderEdges();
-      renderNodes();
-      renderDetails(nodeById.get(graph.nodes[0].id));
+      function highlightNeighborhood(nodeId) {
+        const neighbors = nodeId ? adjacency.get(nodeId) || new Set() : null;
+        document.querySelectorAll(".node").forEach((element) => {
+          const id = element.getAttribute("data-node-id");
+          const dim = Boolean(nodeId && id !== nodeId && !neighbors.has(id));
+          element.classList.toggle("dimmed", dim);
+        });
+        document.querySelectorAll(".edge").forEach((element) => {
+          const dim = Boolean(
+            nodeId &&
+              element.getAttribute("data-from-id") !== nodeId &&
+              element.getAttribute("data-to-id") !== nodeId
+          );
+          element.classList.toggle("dimmed", dim);
+        });
+      }
+
+      function applyVisibility() {
+        const query = state.query.trim().toLowerCase();
+        const visibleIds = new Set();
+        graph.nodes.forEach((node) => {
+          const typeAllowed = node.type === "meeting" || node.type === "point" || activeTypes.has(node.type);
+          const text = (node.title + " " + node.body + " " + node.type).toLowerCase();
+          const queryAllowed = !query || text.includes(query);
+          if (typeAllowed && queryAllowed) {
+            visibleIds.add(node.id);
+          }
+        });
+
+        document.querySelectorAll(".node").forEach((element) => {
+          element.classList.toggle("hidden", !visibleIds.has(element.getAttribute("data-node-id")));
+        });
+        document.querySelectorAll(".edge").forEach((element) => {
+          const fromVisible = visibleIds.has(element.getAttribute("data-from-id"));
+          const toVisible = visibleIds.has(element.getAttribute("data-to-id"));
+          element.classList.toggle("hidden", !fromVisible || !toVisible);
+        });
+        emptyState.classList.toggle("visible", visibleIds.size === 0);
+      }
+
+      function applyTransform() {
+        viewport.setAttribute("transform", "translate(" + state.tx + " " + state.ty + ") scale(" + state.scale + ")");
+      }
+
+      document.querySelectorAll("[data-filter-type]").forEach((button) => {
+        button.addEventListener("click", () => {
+          const type = button.getAttribute("data-filter-type");
+          if (activeTypes.has(type)) {
+            activeTypes.delete(type);
+            button.setAttribute("aria-pressed", "false");
+          } else {
+            activeTypes.add(type);
+            button.setAttribute("aria-pressed", "true");
+          }
+          applyVisibility();
+        });
+      });
+
+      searchInput.addEventListener("input", () => {
+        state.query = searchInput.value;
+        applyVisibility();
+      });
+
+      document.querySelectorAll("[data-zoom-action]").forEach((button) => {
+        button.addEventListener("click", () => {
+          const action = button.getAttribute("data-zoom-action");
+          if (action === "in") state.scale = Math.min(2.4, state.scale + 0.18);
+          if (action === "out") state.scale = Math.max(0.45, state.scale - 0.18);
+          if (action === "reset") {
+            state.scale = 1;
+            state.tx = 0;
+            state.ty = 0;
+          }
+          applyTransform();
+        });
+      });
+
+      let drag = null;
+      svg.addEventListener("pointerdown", (event) => {
+        if (event.target.closest(".node")) return;
+        drag = { x: event.clientX, y: event.clientY, tx: state.tx, ty: state.ty };
+        svg.setPointerCapture(event.pointerId);
+      });
+      svg.addEventListener("pointermove", (event) => {
+        if (!drag) return;
+        state.tx = drag.tx + event.clientX - drag.x;
+        state.ty = drag.ty + event.clientY - drag.y;
+        applyTransform();
+      });
+      svg.addEventListener("pointerup", () => {
+        drag = null;
+      });
+
+      runForceLayout();
+      renderEmbeddedAudio();
+      renderGraph();
+      applyTransform();
+      if (state.selectedId) {
+        selectNode(state.selectedId);
+      }
     </script>
   </body>
 </html>`;

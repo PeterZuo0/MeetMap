@@ -3,6 +3,7 @@ import type {
   MeetingAudioTracks,
   MeetingId,
   MeetingMetadata,
+  ProcessingProgressUpdate,
   ProcessingStep
 } from "../meetings/meetingTypes.js";
 import type { MeetingStore } from "../meetings/meetingStore.js";
@@ -14,19 +15,28 @@ import { validateMeetingStructure } from "../intelligence/meetingStructureSchema
 import { createWordSummaryDocx } from "../exports/word/wordExport.js";
 import { createHtmlMeetingMap } from "../exports/html-map/htmlMapExport.js";
 import type { ProcessingPreferences } from "../settings/processingPreferences.js";
+import type { DiarizationClient, DiarizationResult } from "../diarization/diarizationTypes.js";
+import { applyDiarizationToTranscript } from "../diarization/transcriptDiarization.js";
+import { createTrackDiarizationClient } from "../diarization/trackDiarizationClient.js";
+
+export type PostMeetingTranscriptionContext = {
+  onTranscriptionProgress?: (progress: { completedChunks: number; totalChunks: number }) => void;
+};
 
 export type PostMeetingWorkflowServices = {
   detectActivity(tracks: MeetingAudioTracks): Promise<VoiceActivityDecision>;
   transcribe(
     tracksToProcess: VoiceActivityDecision["tracksToProcess"],
     metadata: MeetingMetadata,
-    preferences?: ProcessingPreferences
+    preferences?: ProcessingPreferences,
+    context?: PostMeetingTranscriptionContext
   ): Promise<TranscriptSegment[]>;
   extractStructure(
     transcript: TranscriptSegment[],
     metadata: MeetingMetadata,
     preferences?: ProcessingPreferences
   ): Promise<MeetingStructure>;
+  diarize?: DiarizationClient["diarize"];
 };
 
 export type ProcessMeetingInput = {
@@ -35,6 +45,7 @@ export type ProcessMeetingInput = {
   services?: PostMeetingWorkflowServices;
   mode?: "production" | "demo";
   onStepChange?: (step: ProcessingStep) => void;
+  onProgress?: (progress: ProcessingProgressUpdate) => void;
   preferences?: ProcessingPreferences;
 };
 
@@ -50,6 +61,7 @@ export async function processMeeting({
   services,
   mode = "production",
   onStepChange,
+  onProgress,
   preferences
 }: ProcessMeetingInput): Promise<ProcessMeetingResult> {
   const workflowServices = resolveWorkflowServices({ mode, services });
@@ -73,6 +85,10 @@ export async function processMeeting({
     };
     await store.writeMetadata(metadata);
     onStepChange?.(step);
+    onProgress?.(createProcessingProgressUpdate({
+      meetingId,
+      step
+    }));
   }
 
   try {
@@ -97,13 +113,32 @@ export async function processMeeting({
     }
 
     await persist("transcription");
-    const transcript = await workflowServices.transcribe(activity.tracksToProcess, metadata, preferences);
-    await writeFile(paths.transcriptPath, `${JSON.stringify({ segments: transcript }, null, 2)}\n`);
+    const transcript = await workflowServices.transcribe(activity.tracksToProcess, metadata, preferences, {
+      onTranscriptionProgress(progress) {
+        onProgress?.(createProcessingProgressUpdate({
+          meetingId,
+          step: "transcription",
+          transcription: progress
+        }));
+      }
+    });
+    const diarization = await maybeRunDiarization({
+      activity,
+      metadata,
+      preferences,
+      services: workflowServices
+    });
+    if (diarization) {
+      await writeFile(paths.diarizationPath, `${JSON.stringify(diarization, null, 2)}\n`, "utf8");
+    }
+    const speakerLabeledTranscript = applyDiarizationToTranscript(transcript, diarization);
+    await writeFile(paths.transcriptPath, `${JSON.stringify({ segments: speakerLabeledTranscript }, null, 2)}\n`);
 
     await persist("merge", {
-      transcriptPath: paths.transcriptPath
+      transcriptPath: paths.transcriptPath,
+      diarizationPath: diarization ? paths.diarizationPath : metadata.diarizationPath
     });
-    const mergedTranscript = mergeTranscriptSegments(transcript);
+    const mergedTranscript = mergeTranscriptSegments(speakerLabeledTranscript);
     await writeFile(
       paths.transcriptPath,
       `${JSON.stringify({ segments: mergedTranscript }, null, 2)}\n`
@@ -156,6 +191,48 @@ export async function processMeeting({
   }
 }
 
+const PROGRESS_STEPS: ProcessingStep[] = [
+  "activity_detection",
+  "transcription",
+  "merge",
+  "structure_extraction",
+  "word_export",
+  "html_map_export"
+];
+
+function createProcessingProgressUpdate({
+  meetingId,
+  step,
+  transcription
+}: {
+  meetingId: MeetingId;
+  step: ProcessingStep;
+  transcription?: { completedChunks: number; totalChunks: number };
+}): ProcessingProgressUpdate {
+  const stepIndex = PROGRESS_STEPS.includes(step)
+    ? PROGRESS_STEPS.indexOf(step)
+    : step === "completed"
+      ? PROGRESS_STEPS.length
+      : 0;
+  const stepFraction = transcription && transcription.totalChunks > 0
+    ? transcription.completedChunks / transcription.totalChunks
+    : step === "completed"
+      ? 0
+      : 0;
+  const rawPercent = step === "completed"
+    ? 100
+    : ((stepIndex + stepFraction) / PROGRESS_STEPS.length) * 100;
+
+  return {
+    meetingId,
+    step,
+    currentStep: Math.min(PROGRESS_STEPS.length, stepIndex + 1),
+    totalSteps: PROGRESS_STEPS.length,
+    percent: Math.max(0, Math.min(100, Math.round(rawPercent))),
+    updatedAt: new Date().toISOString(),
+    transcription
+  };
+}
 function resolveWorkflowServices({
   mode,
   services
@@ -174,8 +251,34 @@ function resolveWorkflowServices({
   throw new Error("Post-meeting workflow services must be configured");
 }
 
+async function maybeRunDiarization({
+  activity,
+  metadata,
+  preferences,
+  services
+}: {
+  activity: VoiceActivityDecision;
+  metadata: MeetingMetadata;
+  preferences: ProcessingPreferences | undefined;
+  services: PostMeetingWorkflowServices;
+}): Promise<DiarizationResult | null> {
+  if (!preferences?.speakerDiarization || !services.diarize) {
+    return null;
+  }
+
+  return services.diarize({
+    meeting: metadata,
+    tracksToProcess: activity.tracksToProcess,
+    audioTracks: metadata.audioTracks
+  });
+}
+
 export function createDemoWorkflowServices(): PostMeetingWorkflowServices {
+  const diarizationClient = createTrackDiarizationClient();
+
   return {
+    diarize: diarizationClient.diarize,
+
     async detectActivity(tracks) {
       return decideVoiceActivity({
         tracks: {

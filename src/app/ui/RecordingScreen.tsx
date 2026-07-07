@@ -1,10 +1,30 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { gsap } from "gsap";
 import type { MeetingMetadata } from "../../features/meetings/meetingTypes";
-import type { RecordingAudioSources, UiLanguage } from "../meetMapApi";
+import type { RecordingAudioLevel, RecordingAudioSources, TaggedMomentInput, UiLanguage } from "../meetMapApi";
 import { label } from "./copy";
 import { Icon } from "./icons";
 
 export type RecordingAudioState = "both" | "system-only" | "microphone-only" | "none";
+type RecordingTrack = "system" | "microphone";
+type RecordingLevelSeries = Partial<Record<RecordingTrack, RecordingAudioLevel[]>>;
+type TaggedMoment = {
+  id: string;
+  elapsedSeconds: number;
+  time: string;
+  text: string;
+  level: number;
+  track: RecordingTrack | "none";
+};
+type TrackActivityStats = {
+  currentLevel: number;
+  silenceSeconds: number;
+  speechSeconds: number;
+  status: "Listening" | "Quiet" | "Speaking";
+};
+
+const WAVE_BAR_COUNT = 92;
+const SPEECH_THRESHOLD = 0.18;
 
 export function RecordingScreen({
   lang,
@@ -14,9 +34,11 @@ export function RecordingScreen({
   isStopping,
   isPaused,
   isPauseChanging,
+  recordingLevels = {},
   onStop,
   onOpenAudioSettings,
-  onPauseChange
+  onPauseChange,
+  onTagMoment = () => undefined
 }: {
   lang: UiLanguage;
   meeting: MeetingMetadata | null;
@@ -25,14 +47,23 @@ export function RecordingScreen({
   isStopping: boolean;
   isPaused: boolean;
   isPauseChanging: boolean;
+  recordingLevels?: RecordingLevelSeries;
   onStop(): void;
   onOpenAudioSettings(): void;
   onPauseChange(paused: boolean): void;
+  onTagMoment?(moment: TaggedMomentInput): void;
 }) {
-  const [elapsed, setElapsed] = useState(0);
-  const [taggedMoments, setTaggedMoments] = useState<Array<{ time: string; text: string }>>([]);
+  const [elapsed, setElapsed] = useState(() => getInitialElapsedSeconds(meeting));
+  const [taggedMoments, setTaggedMoments] = useState<TaggedMoment[]>([]);
   const audioState = getRecordingAudioState(audioSources);
   const title = meeting?.title ?? "Untitled meeting";
+  const systemStats = useMemo(() => createTrackStats(recordingLevels.system ?? []), [recordingLevels.system]);
+  const microphoneStats = useMemo(() => createTrackStats(recordingLevels.microphone ?? []), [recordingLevels.microphone]);
+
+  useEffect(() => {
+    setElapsed(getInitialElapsedSeconds(meeting));
+    setTaggedMoments([]);
+  }, [meeting?.id]);
 
   useEffect(() => {
     if (isPaused) {
@@ -44,6 +75,45 @@ export function RecordingScreen({
   }, [isPaused]);
 
   const elapsedText = formatElapsed(elapsed);
+  const startedAtText = formatStartedAt(meeting);
+  const addTaggedMoment = useCallback(() => {
+    const nextMoment = createTaggedMoment({
+      elapsedSeconds: elapsed,
+      elapsedText,
+      id: `${Date.now()}-${taggedMoments.length}`,
+      microphoneStats,
+      systemStats
+    });
+    setTaggedMoments((current) => [
+      ...current,
+      nextMoment
+    ]);
+    onTagMoment({
+      elapsedMs: elapsed * 1000,
+      level: nextMoment.level,
+      text: nextMoment.text,
+      time: nextMoment.time,
+      track: nextMoment.track
+    });
+  }, [elapsed, elapsedText, microphoneStats, onTagMoment, systemStats, taggedMoments.length]);
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key.toLowerCase() !== "m" || event.repeat) {
+        return;
+      }
+
+      const target = event.target;
+      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) {
+        return;
+      }
+
+      addTaggedMoment();
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [addTaggedMoment]);
 
   return (
     <section className="pane recording-pane" aria-label="Recording">
@@ -51,10 +121,10 @@ export function RecordingScreen({
         <div>
           <div className="recording-title-line">
             <h1 className="h1">{title}</h1>
-            <span className="chip">Auto-titled</span>
+            {isAutoTitled(title) ? <span className="chip">Auto-titled</span> : null}
           </div>
           <p className="sub">
-            Started 10:30 · <span className="mono-text">{elapsedText}</span> · autosaving every 30s
+            Started {startedAtText} - <span className="mono-text">{elapsedText}</span> - saving local tracks
           </p>
         </div>
         <StateBanner audioState={audioState} onOpenAudioSettings={onOpenAudioSettings} />
@@ -76,12 +146,7 @@ export function RecordingScreen({
           <div className="recording-actions">
             <button
               className="btn"
-              onClick={() =>
-                setTaggedMoments((current) => [
-                  ...current,
-                  { time: elapsedText, text: `Marked moment ${current.length + 1}` }
-                ])
-              }
+              onClick={addTaggedMoment}
               type="button"
             >
               <Icon name="pin" size={13} />
@@ -98,16 +163,16 @@ export function RecordingScreen({
             </button>
             <button className="btn danger" disabled={isStopping} onClick={onStop} type="button">
               <Icon name="stop" size={13} />
-              {isStopping ? label(lang, "Stopping...", "正在停止...") : label(lang, "Stop & process", "停止并处理")}
+              {isStopping ? label(lang, "Stopping...", "æ­£åœ¨åœæ­¢...") : label(lang, "Stop & process", "åœæ­¢å¹¶å¤„ç†")}
             </button>
           </div>
         </div>
 
-        <DualTrackWaveform audioState={audioState} paused={isPaused} />
+        <DualTrackWaveform audioState={audioState} paused={isPaused} recordingLevels={recordingLevels} />
       </div>
 
       <div className="recording-bottom-grid">
-        <LiveActivity audioState={audioState} paused={isPaused} />
+        <LiveActivity audioState={audioState} microphoneStats={microphoneStats} paused={isPaused} systemStats={systemStats} />
         <TaggedMoments audioState={audioState} taggedMoments={taggedMoments} />
       </div>
     </section>
@@ -131,15 +196,17 @@ function getRecordingAudioState(audioSources: RecordingAudioSources): RecordingA
 }
 
 function stateListeningCopy(audioState: RecordingAudioState): string {
+  if (audioState === "none") {
+    return "Recording silence";
+  }
+
   switch (audioState) {
     case "both":
-      return "Listening on both tracks";
+      return "Recording system + microphone";
     case "system-only":
-      return "Listening on system audio";
+      return "Recording system audio";
     case "microphone-only":
-      return "Listening on microphone";
-    case "none":
-      return "Recording silence — no audio detected";
+      return "Recording microphone";
   }
 }
 
@@ -153,53 +220,75 @@ function StateBanner({
   if (audioState === "both") {
     return (
       <div className="state-banner positive">
-        <span className="state-symbol">✓</span>
-        <strong>Both tracks live</strong>
-        <span>System + microphone detected</span>
+        <span className="state-symbol"><Icon name="check" size={12} /></span>
+        <strong>Recording system + microphone</strong>
+        <span>Audio is being saved even during quiet moments</span>
       </div>
     );
   }
 
   if (audioState === "system-only") {
     return (
-      <div className="state-banner warn">
-        <span className="state-symbol">!</span>
-        <strong>System audio only</strong>
-        <span>Microphone is silent or disabled · one-sided transcript</span>
-        <button className="link-button" onClick={onOpenAudioSettings} type="button">Fix</button>
+      <div className="state-banner positive">
+        <span className="state-symbol"><Icon name="check" size={12} /></span>
+        <strong>Recording system audio</strong>
+        <span>Microphone track is disabled for this recording</span>
+        <button className="link-button" onClick={onOpenAudioSettings} type="button">Devices</button>
       </div>
     );
   }
 
   if (audioState === "microphone-only") {
     return (
-      <div className="state-banner warn">
-        <span className="state-symbol">!</span>
-        <strong>Microphone only</strong>
-        <span>No system audio · voice memo style processing</span>
-        <button className="link-button" onClick={onOpenAudioSettings} type="button">Fix</button>
+      <div className="state-banner positive">
+        <span className="state-symbol"><Icon name="check" size={12} /></span>
+        <strong>Recording microphone</strong>
+        <span>System audio track is disabled for this recording</span>
+        <button className="link-button" onClick={onOpenAudioSettings} type="button">Devices</button>
       </div>
     );
   }
 
   return (
-    <div className="state-banner danger">
-      <span className="state-symbol">!</span>
-      <strong>No audio detected</strong>
-      <span>Both tracks are silent · check devices</span>
+    <div className="state-banner positive">
+      <span className="state-symbol"><Icon name="check" size={12} /></span>
+      <strong>Recording silence</strong>
+      <span>Recording can continue without detected input</span>
       <button className="link-button" onClick={onOpenAudioSettings} type="button">Devices</button>
     </div>
   );
 }
 
-function DualTrackWaveform({ audioState, paused }: { audioState: RecordingAudioState; paused: boolean }) {
+function DualTrackWaveform({
+  audioState,
+  paused,
+  recordingLevels
+}: {
+  audioState: RecordingAudioState;
+  paused: boolean;
+  recordingLevels: RecordingLevelSeries;
+}) {
   const systemActive = !paused && (audioState === "both" || audioState === "system-only");
   const microphoneActive = !paused && (audioState === "both" || audioState === "microphone-only");
 
   return (
     <div className="dual-waveform">
-      <TrackWave icon="monitor" label="System" sub="Realtek HD" active={systemActive} tone="system" />
-      <TrackWave icon="mic" label="Microphone" sub="Shure MV7" active={microphoneActive} tone="microphone" />
+      <TrackWave
+        icon="monitor"
+        label="System"
+        sub="System mix"
+        active={systemActive}
+        samples={recordingLevels.system ?? []}
+        tone="system"
+      />
+      <TrackWave
+        icon="mic"
+        label="Microphone"
+        sub="Selected input"
+        active={microphoneActive}
+        samples={recordingLevels.microphone ?? []}
+        tone="microphone"
+      />
       <div className="wave-ruler">
         {["00:00", "02:30", "05:00", "07:30", "10:00", "12:30", "14:07"].map((time) => (
           <span key={time}>{time}</span>
@@ -214,23 +303,32 @@ function TrackWave({
   label,
   sub,
   active,
+  samples,
   tone
 }: {
   icon: "monitor" | "mic";
   label: string;
   sub: string;
   active: boolean;
+  samples: RecordingAudioLevel[];
   tone: "system" | "microphone";
 }) {
-  const bars = useMemo(
-    () =>
-      Array.from({ length: 92 }, (_, index) => {
-        const value = Math.abs(Math.sin(index * 0.31) + Math.sin(index * 0.17) * 0.7) / 1.7;
-        const isGap = Math.sin(index * 0.13) < -0.45;
-        return isGap ? value * 0.12 : value;
-      }),
-    []
-  );
+  const barRefs = useRef<Array<HTMLSpanElement | null>>([]);
+  const bars = useMemo(() => createWaveBars(samples), [samples]);
+  const currentLevel = samples.at(-1)?.level ?? 0;
+  const hasSamples = samples.length > 0;
+
+  useEffect(() => {
+    const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+    gsap.to(barRefs.current.filter(Boolean), {
+      duration: reduceMotion ? 0 : 0.22,
+      ease: "power2.out",
+      overwrite: "auto",
+      scaleY: (index) => Math.max(0.08, bars[index] ?? 0.02),
+      stagger: reduceMotion ? 0 : { amount: 0.05, from: "end" },
+      transformOrigin: "50% 50%"
+    });
+  }, [bars]);
 
   return (
     <div className={`track-wave ${active ? "" : "muted"} ${tone}`}>
@@ -241,20 +339,38 @@ function TrackWave({
           <span>{sub}</span>
         </div>
       </div>
-      <div className="wave-canvas">
+      <div className="wave-canvas" aria-label={`${label} input level ${Math.round(currentLevel * 100)}%`}>
         <div className="wave-center" />
         <div className="wave-bars">
           {bars.map((value, index) => (
-            <span key={index} style={{ height: `${Math.max(2, value * 36)}px` }} />
+            <span
+              key={index}
+              ref={(element) => {
+                barRefs.current[index] = element;
+              }}
+              style={{ transform: `scaleY(${Math.max(0.08, value)})` }}
+            />
           ))}
         </div>
-        {!active ? <div className="no-signal">No signal</div> : <div className="live-cursor" />}
+        {!active ? <div className="no-signal">Disabled</div> : null}
+        {active && !hasSamples ? <div className="no-signal soft">Listening</div> : null}
+        {active ? <div className="live-cursor" /> : null}
       </div>
     </div>
   );
 }
 
-function LiveActivity({ audioState, paused }: { audioState: RecordingAudioState; paused: boolean }) {
+function LiveActivity({
+  audioState,
+  microphoneStats,
+  paused,
+  systemStats
+}: {
+  audioState: RecordingAudioState;
+  microphoneStats: TrackActivityStats;
+  paused: boolean;
+  systemStats: TrackActivityStats;
+}) {
   const systemActive = !paused && (audioState === "both" || audioState === "system-only");
   const microphoneActive = !paused && (audioState === "both" || audioState === "microphone-only");
 
@@ -263,11 +379,11 @@ function LiveActivity({ audioState, paused }: { audioState: RecordingAudioState;
       <div className="panel-title-row">
         <h2 className="h2">Live activity</h2>
         <span className="sub">Speech detection runs locally</span>
-        <span className="chip">No transcription yet</span>
+        <span className="chip">No live transcription</span>
       </div>
-      <ActivityRow icon="monitor" label="System audio" active={systemActive} stats={systemActive ? ["7m 04s", "1m 12s", "EN 92%"] : ["—", "—", "—"]} />
+      <ActivityRow icon="monitor" label="System audio" active={systemActive} stats={systemStats} />
       <div className="panel-divider" />
-      <ActivityRow icon="mic" label="Microphone" active={microphoneActive} stats={microphoneActive ? ["4m 18s", "3m 50s", "中 86%"] : ["—", "—", "—"]} />
+      <ActivityRow icon="mic" label="Microphone" active={microphoneActive} stats={microphoneStats} />
     </div>
   );
 }
@@ -281,8 +397,13 @@ function ActivityRow({
   icon: "monitor" | "mic";
   label: string;
   active: boolean;
-  stats: string[];
+  stats: TrackActivityStats;
 }) {
+  const status = active ? stats.status : "Muted";
+  const values = active
+    ? [formatPercent(stats.currentLevel), formatElapsed(stats.speechSeconds), formatElapsed(stats.silenceSeconds)]
+    : ["-", "-", "-"];
+
   return (
     <div className={`activity-row ${active ? "" : "muted"}`}>
       <div className="activity-icon">
@@ -290,12 +411,12 @@ function ActivityRow({
       </div>
       <div>
         <strong>{label}</strong>
-        <span className="activity-status">{active ? "Speaking" : "Muted"}</span>
+        <span className="activity-status">{status}</span>
       </div>
-      {["Speech", "Silence", "Detected lang"].map((key, index) => (
+      {["Input", "Speech", "Silence"].map((key, index) => (
         <div className="activity-stat" key={key}>
           <span>{key}</span>
-          <strong>{stats[index]}</strong>
+          <strong>{values[index]}</strong>
         </div>
       ))}
     </div>
@@ -307,38 +428,151 @@ function TaggedMoments({
   taggedMoments
 }: {
   audioState: RecordingAudioState;
-  taggedMoments: Array<{ time: string; text: string }>;
+  taggedMoments: TaggedMoment[];
 }) {
-  const defaultMoments =
-    taggedMoments.length > 0
-      ? taggedMoments
-      : [
-          { time: "02:14", text: "Decision · ship list" },
-          { time: "05:38", text: "Action · Maya owns export pipeline" },
-          { time: "09:51", text: "Question · pricing for batch" }
-        ];
-
   return (
     <div className="recording-panel">
       <div className="panel-title-row">
         <h2 className="h2">Tagged moments</h2>
         <span className="sub">Press M to tag</span>
       </div>
-      {audioState === "none" ? (
-        <div className="empty-tags">No tags yet · current recording has no audio</div>
+      {taggedMoments.length === 0 ? (
+        <div className="empty-tags">
+          {audioState === "none" ? "No tagged moments yet - recording silence" : "No tagged moments yet"}
+        </div>
       ) : (
         <div className="tag-list">
-          {defaultMoments.map(({ time, text }, index) => (
-            <div className="tag-row" key={time}>
+          {taggedMoments.map(({ id, level, time, text, track }, index) => (
+            <div className="tag-row" key={id}>
               <span className="mono-text">{time}</span>
-              <span className={`tag-dot dot-${index}`} />
+              <span className={`tag-dot ${track === "microphone" ? "dot-1" : track === "none" ? "dot-2" : `dot-${index % 3}`}`} />
               <span>{text}</span>
+              <span className="tag-level">{formatPercent(level)}</span>
             </div>
           ))}
         </div>
       )}
     </div>
   );
+}
+
+function createWaveBars(samples: RecordingAudioLevel[]): number[] {
+  const recent = samples.slice(-WAVE_BAR_COUNT).map((sample) => clampLevel(sample.level));
+  const padding = Array.from({ length: Math.max(0, WAVE_BAR_COUNT - recent.length) }, () => 0.02);
+  return [...padding, ...recent];
+}
+
+function createTrackStats(samples: RecordingAudioLevel[]): TrackActivityStats {
+  if (samples.length === 0) {
+    return {
+      currentLevel: 0,
+      silenceSeconds: 0,
+      speechSeconds: 0,
+      status: "Listening"
+    };
+  }
+
+  const sorted = [...samples].sort((left, right) => Date.parse(left.occurredAt) - Date.parse(right.occurredAt));
+  let speechMs = 0;
+  let silenceMs = 0;
+
+  sorted.forEach((sample, index) => {
+    const nextSample = sorted[index + 1];
+    const durationMs = nextSample
+      ? Math.max(0, Math.min(5000, Date.parse(nextSample.occurredAt) - Date.parse(sample.occurredAt)))
+      : 1000;
+
+    if (sample.level >= SPEECH_THRESHOLD) {
+      speechMs += durationMs;
+    } else {
+      silenceMs += durationMs;
+    }
+  });
+
+  const currentLevel = clampLevel(sorted.at(-1)?.level ?? 0);
+  return {
+    currentLevel,
+    silenceSeconds: Math.round(silenceMs / 1000),
+    speechSeconds: Math.round(speechMs / 1000),
+    status: currentLevel >= SPEECH_THRESHOLD ? "Speaking" : "Quiet"
+  };
+}
+
+function createTaggedMoment({
+  elapsedSeconds,
+  elapsedText,
+  id,
+  microphoneStats,
+  systemStats
+}: {
+  elapsedSeconds: number;
+  elapsedText: string;
+  id: string;
+  microphoneStats: TrackActivityStats;
+  systemStats: TrackActivityStats;
+}): TaggedMoment {
+  const systemLevel = systemStats.currentLevel;
+  const microphoneLevel = microphoneStats.currentLevel;
+  const track = Math.max(systemLevel, microphoneLevel) === 0
+    ? "none"
+    : systemLevel >= microphoneLevel
+      ? "system"
+      : "microphone";
+  const level = track === "system" ? systemLevel : track === "microphone" ? microphoneLevel : 0;
+  const labelText = track === "system" ? "System audio" : track === "microphone" ? "Microphone" : "Quiet moment";
+
+  return {
+    id,
+    elapsedSeconds,
+    level,
+    text: `${labelText} - ${formatPercent(level)} input`,
+    time: elapsedText,
+    track
+  };
+}
+
+function getInitialElapsedSeconds(meeting: MeetingMetadata | null): number {
+  const startedAt = meeting?.timestamps.recordingStartedAt;
+  if (!startedAt) {
+    return 0;
+  }
+
+  const startedAtMs = Date.parse(startedAt);
+  if (!Number.isFinite(startedAtMs)) {
+    return 0;
+  }
+
+  return Math.max(0, Math.floor((Date.now() - startedAtMs) / 1000));
+}
+
+function formatStartedAt(meeting: MeetingMetadata | null): string {
+  const startedAt = meeting?.timestamps.recordingStartedAt;
+  if (!startedAt) {
+    return "now";
+  }
+
+  const date = new Date(startedAt);
+  if (Number.isNaN(date.getTime())) {
+    return "now";
+  }
+
+  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function isAutoTitled(title: string): boolean {
+  return title.trim().length === 0 || /^Untitled meeting/i.test(title);
+}
+
+function clampLevel(level: number): number {
+  if (!Number.isFinite(level)) {
+    return 0;
+  }
+
+  return Math.max(0, Math.min(1, level));
+}
+
+function formatPercent(level: number): string {
+  return `${Math.round(clampLevel(level) * 100)}%`;
 }
 
 function formatElapsed(seconds: number): string {

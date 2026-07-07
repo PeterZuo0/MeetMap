@@ -65,3 +65,43 @@ test("preserves original input order within the same timestamp and track", () =>
     "mic-2"
   ]);
 });
+
+test("drops duplicate transcript segments from overlapped chunks", () => {
+  const segments = [
+    {
+      ...segment("sys-1", "system", 294_000, "We should confirm the launch date."),
+      endTimeMs: 300_500
+    },
+    {
+      ...segment("sys-dup", "system", 295_000, "We should confirm the launch date."),
+      endTimeMs: 301_000
+    },
+    {
+      ...segment("sys-2", "system", 301_500, "The next topic is support coverage."),
+      endTimeMs: 305_000
+    }
+  ];
+
+  expect(mergeTranscriptSegments(segments).map((item) => item.id)).toEqual([
+    "sys-1",
+    "sys-2"
+  ]);
+});
+
+test("keeps different content even when timestamps overlap", () => {
+  const segments = [
+    {
+      ...segment("sys-1", "system", 10_000, "The launch date is confirmed."),
+      endTimeMs: 14_000
+    },
+    {
+      ...segment("sys-2", "system", 12_000, "Budget approval is still open."),
+      endTimeMs: 16_000
+    }
+  ];
+
+  expect(mergeTranscriptSegments(segments).map((item) => item.id)).toEqual([
+    "sys-1",
+    "sys-2"
+  ]);
+});

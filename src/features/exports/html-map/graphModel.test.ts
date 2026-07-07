@@ -147,17 +147,52 @@ test("builds hierarchy edges and explicit relation edges", () => {
   const graph = buildMeetingGraph(meetingStructure());
 
   expect(graph.edges).toEqual([
-    { id: "hierarchy:meeting-1->topic-1", type: "contains", fromId: "meeting-1", toId: "topic-1", explicit: false },
-    { id: "hierarchy:meeting-1->topic-2", type: "contains", fromId: "meeting-1", toId: "topic-2", explicit: false },
-    { id: "hierarchy:topic-2->point-1", type: "contains", fromId: "topic-2", toId: "point-1", explicit: false },
-    { id: "hierarchy:topic-1->decision-1", type: "contains", fromId: "topic-1", toId: "decision-1", explicit: false },
-    { id: "hierarchy:topic-2->action-1", type: "contains", fromId: "topic-2", toId: "action-1", explicit: false },
-    { id: "hierarchy:topic-2->question-1", type: "contains", fromId: "topic-2", toId: "question-1", explicit: false },
-    { id: "hierarchy:topic-1->risk-1", type: "contains", fromId: "topic-1", toId: "risk-1", explicit: false },
-    { id: "rel-1", type: "supports", fromId: "point-1", toId: "decision-1", explicit: true },
-    { id: "rel-2", type: "creates_action", fromId: "decision-1", toId: "action-1", explicit: true },
-    { id: "rel-3", type: "blocks", fromId: "risk-1", toId: "action-1", explicit: true }
+    expect.objectContaining({ id: "hierarchy:meeting-1->topic-1", type: "contains", fromId: "meeting-1", toId: "topic-1", explicit: false }),
+    expect.objectContaining({ id: "hierarchy:meeting-1->topic-2", type: "contains", fromId: "meeting-1", toId: "topic-2", explicit: false }),
+    expect.objectContaining({ id: "hierarchy:topic-2->point-1", type: "contains", fromId: "topic-2", toId: "point-1", explicit: false }),
+    expect.objectContaining({ id: "hierarchy:topic-1->decision-1", type: "contains", fromId: "topic-1", toId: "decision-1", explicit: false }),
+    expect.objectContaining({ id: "hierarchy:topic-2->action-1", type: "contains", fromId: "topic-2", toId: "action-1", explicit: false }),
+    expect.objectContaining({ id: "hierarchy:topic-2->question-1", type: "contains", fromId: "topic-2", toId: "question-1", explicit: false }),
+    expect.objectContaining({ id: "hierarchy:topic-1->risk-1", type: "contains", fromId: "topic-1", toId: "risk-1", explicit: false }),
+    expect.objectContaining({ id: "rel-1", type: "supports", fromId: "point-1", toId: "decision-1", explicit: true }),
+    expect.objectContaining({ id: "rel-2", type: "creates_action", fromId: "decision-1", toId: "action-1", explicit: true }),
+    expect.objectContaining({ id: "rel-3", type: "blocks", fromId: "risk-1", toId: "action-1", explicit: true })
   ]);
+});
+
+test("enriches graph nodes and edges for force-directed HTML layout", () => {
+  const graph = buildMeetingGraph(meetingStructure());
+
+  expect(graph.nodes.find((node) => node.id === "meeting-1")).toEqual(
+    expect.objectContaining({
+      community: "meeting-1",
+      degree: 2,
+      radius: 34,
+      weight: 6
+    })
+  );
+  expect(graph.nodes.find((node) => node.id === "topic-1")).toEqual(
+    expect.objectContaining({
+      community: "topic-1",
+      degree: 3,
+      radius: 27,
+      weight: 5
+    })
+  );
+  expect(graph.nodes.find((node) => node.id === "action-1")).toEqual(
+    expect.objectContaining({
+      community: "topic-2",
+      degree: 3,
+      radius: 20,
+      weight: 4
+    })
+  );
+  expect(graph.edges.find((edge) => edge.id === "hierarchy:meeting-1->topic-1")).toEqual(
+    expect.objectContaining({ weight: 1 })
+  );
+  expect(graph.edges.find((edge) => edge.id === "rel-3")).toEqual(
+    expect.objectContaining({ weight: 3 })
+  );
 });
 
 test("creates standalone HTML with embedded graph data", () => {
@@ -168,6 +203,19 @@ test("creates standalone HTML with embedded graph data", () => {
   expect(html).toContain("id=\"meetmap-graph-data\"");
   expect(html).toContain(JSON.stringify(graph).replace(/</g, "\\u003c"));
   expect(html).toContain("Product planning");
+});
+
+test("creates standalone force relationship map HTML without external scripts", () => {
+  const html = createHtmlMeetingMap(meetingStructure());
+
+  expect(html).toContain('data-layout="force-radial"');
+  expect(html).toContain('id="graph-search"');
+  expect(html).toContain('data-filter-type="decision"');
+  expect(html).toContain('data-zoom-action="in"');
+  expect(html).toContain("runForceLayout");
+  expect(html).toContain("highlightNeighborhood");
+  expect(html).not.toMatch(/<script[^>]+src=/i);
+  expect(html).not.toMatch(/<link[^>]+href=/i);
 });
 
 test("creates HTML graph data with disabled export nodes removed", () => {

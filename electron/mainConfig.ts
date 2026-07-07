@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { parseProviderConfig } from "../src/features/config/providerConfig.js";
 import { createOpenAiMeetingStructureClient } from "../src/features/intelligence/openAiMeetingStructureClient.js";
 import { createOpenAiRequesters } from "../src/features/providers/openAiRequesters.js";
+import { createTrackDiarizationClient } from "../src/features/diarization/trackDiarizationClient.js";
 import { createOpenAiTranscriptionClient } from "../src/features/transcription/openAiTranscriptionClient.js";
 import { createProductionWorkflowServices } from "../src/features/workflow/productionWorkflowServices.js";
 import { createDemoWorkflowServices } from "../src/features/workflow/postMeetingWorkflow.js";
@@ -61,6 +62,7 @@ export function resolveMainRuntimeConfig({
           meetingIpc: {
             workflowMode: "production",
             workflowServices: createProductionWorkflowServices({
+              diarizationClient: createTrackDiarizationClient(),
               transcriptionClient: createOpenAiTranscriptionClient({
                 apiKey: providerConfig.transcription.apiKey,
                 model: providerConfig.transcription.model,

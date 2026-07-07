@@ -16,6 +16,8 @@ export function PreRecordingScreen({
   devices,
   selectedDeviceIds,
   audioPreflight,
+  recognitionLanguageLabel,
+  transcriptionModelLabel,
   error,
   isStarting,
   onTitleChange,
@@ -35,6 +37,8 @@ export function PreRecordingScreen({
   devices: RecordingAudioDevice[];
   selectedDeviceIds: Partial<Record<AudioTrackId, string>>;
   audioPreflight: AudioPreflightState;
+  recognitionLanguageLabel: string;
+  transcriptionModelLabel: string;
   error: string | null;
   isStarting: boolean;
   onTitleChange(title: string): void;
@@ -57,22 +61,22 @@ export function PreRecordingScreen({
     <section className="pane pre-recording-pane" aria-label="Pre-recording setup">
       <div className="pre-recording-head">
         <div>
-          <h1 className="h1">{label(lang, "Set up your recording", "设置录制")}</h1>
+          <h1 className="h1">{label(lang, "Set up your recording", "è®¾ç½®å½•åˆ¶")}</h1>
           <p className="sub">
             {label(
               lang,
               "MeetMap captures system audio and your microphone as two separate tracks. Processing happens after the meeting ends.",
-              "MeetMap 会把系统声音和麦克风作为两条独立轨道录制，会议结束后再处理。"
+              "MeetMap ä¼šæŠŠç³»ç»Ÿå£°éŸ³å’Œéº¦å…‹é£Žä½œä¸ºä¸¤æ¡ç‹¬ç«‹è½¨é“å½•åˆ¶ï¼Œä¼šè®®ç»“æŸåŽå†å¤„ç†ã€‚"
             )}
           </p>
         </div>
         <div className="pre-recording-actions">
           <button className="btn" onClick={onCancel} type="button">
-            {label(lang, "Cancel", "取消")}
+            {label(lang, "Cancel", "å–æ¶ˆ")}
           </button>
           <button className="btn primary" disabled={isStarting || !canStart} onClick={onStart} type="button">
             <Icon name="record" size={14} />
-            {isStarting ? label(lang, "Starting...", "正在开始...") : label(lang, "Start recording", "开始录制")}
+            {isStarting ? label(lang, "Starting...", "æ­£åœ¨å¼€å§‹...") : label(lang, "Start recording", "å¼€å§‹å½•åˆ¶")}
           </button>
         </div>
       </div>
@@ -89,14 +93,6 @@ export function PreRecordingScreen({
             value={title}
           />
         </label>
-        <label className="field">
-          Folder
-          <select className="select" defaultValue="Product weekly">
-            <option>Product weekly</option>
-            <option>1:1s</option>
-            <option>Client calls</option>
-          </select>
-        </label>
       </div>
 
       <div className="pre-section-head">
@@ -112,7 +108,7 @@ export function PreRecordingScreen({
           enabled={audioSources.system}
           icon="monitor"
           onToggle={(enabled) => updateSource("system", enabled)}
-          source="Meeting · Zoom · 会议室 03"
+          source="Meeting Â· Zoom Â· ä¼šè®®å®¤ 03"
           subtitle="What you hear on this PC"
           trackState={audioPreflight.tracks.system}
           title="System audio"
@@ -144,10 +140,10 @@ export function PreRecordingScreen({
 
       <h2 className="h2 pre-block-title">Language & processing</h2>
       <div className="pre-settings-card">
-        <PreSettingsRow labelText="Meeting language (auto-detected)">
+        <PreSettingsRow labelText="Recognition languages">
           <div className="inline-options">
-            <span className="chip">中 / EN</span>
-            <span className="sub">Confidence 96% · will adapt during meeting</span>
+            <span className="chip">{recognitionLanguageLabel}</span>
+            <span className="sub">Used by the configured provider after recording stops</span>
           </div>
         </PreSettingsRow>
         <PreSettingsRow labelText="Output language">
@@ -160,8 +156,7 @@ export function PreRecordingScreen({
         <PreSettingsRow labelText="Transcription model">
           <div className="inline-options">
             <Icon name="spark" size={14} style={{ color: "var(--accent)" }} />
-            <span>MeetMap Cloud · Premium</span>
-            <span className="chip">≈ 0.4c / minute</span>
+            <span>{transcriptionModelLabel}</span>
           </div>
         </PreSettingsRow>
         <PreSettingsRow labelText="Summary style" last>

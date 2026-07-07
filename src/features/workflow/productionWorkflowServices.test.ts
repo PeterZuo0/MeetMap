@@ -160,6 +160,83 @@ describe("createProductionWorkflowServices", () => {
     ]);
   });
 
+  test("chunks long audio before transcription", async () => {
+    const calls: Parameters<TranscriptionClient["transcribeChunk"]>[] = [];
+    const largeMeeting = metadata();
+    largeMeeting.audioTracks.system = {
+      id: "system",
+      filePath: "C:/meetings/1/audio/system.m4a",
+      format: "m4a",
+      hasAudio: true,
+      byteLength: 25_000_000,
+      durationMs: 1_528_821
+    };
+    const services = createProductionWorkflowServices({
+      audioChunker: {
+        async createChunks(input) {
+          expect(input.chunksDir.replaceAll("\\", "/")).toBe("C:/meetings/1/audio/chunks");
+          expect(input.maxChunkDurationMs).toBe(300_000);
+          expect(input.track.filePath).toBe("C:/meetings/1/audio/system.m4a");
+          return [
+            {
+              ...input.baseRequest,
+              id: "meeting-1-system-0001",
+              index: 0,
+              trackId: "system",
+              filePath: "C:/meetings/1/audio/chunks/system-1/system-0000.m4a",
+              startOffsetMs: 0,
+              durationMs: 300_000
+            },
+            {
+              ...input.baseRequest,
+              id: "meeting-1-system-0002",
+              index: 1,
+              trackId: "system",
+              filePath: "C:/meetings/1/audio/chunks/system-1/system-0001.m4a",
+              startOffsetMs: 300_000,
+              durationMs: 300_000
+            }
+          ];
+        }
+      },
+      maxTranscriptionChunkDurationMs: 300_000,
+      transcriptionClient: {
+        async transcribeChunk(request) {
+          calls.push([request]);
+          return [
+            {
+              id: `${request.id}-seg`,
+              trackId: request.trackId,
+              startTimeMs: request.startOffsetMs,
+              endTimeMs: request.startOffsetMs + 1000,
+              text: request.filePath,
+              language: "en",
+              confidence: 0.99
+            }
+          ];
+        }
+      },
+      structureClient: { async extractStructure() { return validStructure(); } }
+    });
+
+    await expect(services.transcribe(["system"], largeMeeting)).resolves.toEqual([
+      expect.objectContaining({ id: "meeting-1-system-0001-seg", startTimeMs: 0 }),
+      expect.objectContaining({ id: "meeting-1-system-0002-seg", startTimeMs: 300_000 })
+    ]);
+
+    expect(calls.map((call) => call[0])).toEqual([
+      expect.objectContaining({
+        id: "meeting-1-system-0001",
+        filePath: "C:/meetings/1/audio/chunks/system-1/system-0000.m4a",
+        startOffsetMs: 0
+      }),
+      expect.objectContaining({
+        id: "meeting-1-system-0002",
+        filePath: "C:/meetings/1/audio/chunks/system-1/system-0001.m4a",
+        startOffsetMs: 300_000
+      })
+    ]);
+  });
   test("blocks production transcription when cloud audio upload is disabled", async () => {
     const calls: Parameters<TranscriptionClient["transcribeChunk"]>[] = [];
     const services = createProductionWorkflowServices({
@@ -262,6 +339,34 @@ describe("createProductionWorkflowServices", () => {
         }
       ]
     ]);
+  });
+
+  test("uses the configured local diarization client when provided", async () => {
+    const services = createProductionWorkflowServices({
+      diarizationClient: {
+        async diarize() {
+          return {
+            engine: "test-diarizer",
+            device: "cpu",
+            speakers: [{ id: "speaker-1", label: "Speaker 1" }],
+            segments: []
+          };
+        }
+      },
+      transcriptionClient: { async transcribeChunk() { return []; } },
+      structureClient: { async extractStructure() { return validStructure(); } }
+    });
+
+    await expect(
+      services.diarize?.({
+        meeting: metadata(),
+        tracksToProcess: ["system"],
+        audioTracks: metadata().audioTracks
+      })
+    ).resolves.toMatchObject({
+      engine: "test-diarizer",
+      device: "cpu"
+    });
   });
 
   test("passes structure preferences to the meeting intelligence provider", async () => {

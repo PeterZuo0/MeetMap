@@ -65,12 +65,18 @@ export function createTranscriptionError(
 
 export async function transcribeChunks(
   client: TranscriptionClient,
-  requests: readonly TranscriptionChunkRequest[]
+  requests: readonly TranscriptionChunkRequest[],
+  onChunkComplete?: (progress: { completedChunks: number; totalChunks: number; request: TranscriptionChunkRequest }) => void
 ): Promise<TranscriptSegment[]> {
   const segments: TranscriptSegment[] = [];
 
-  for (const request of requests) {
+  for (const [index, request] of requests.entries()) {
     segments.push(...(await client.transcribeChunk(request)));
+    onChunkComplete?.({
+      completedChunks: index + 1,
+      totalChunks: requests.length,
+      request
+    });
   }
 
   return segments;

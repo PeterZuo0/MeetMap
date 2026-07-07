@@ -28,3 +28,8 @@ pnpm-debug.log*
 meetings/**/*.docx
 meetings/**/*.html
 .superpowers/
+docs/
+.agents/
+.idea/
+.impeccable/
+skills-lock.json

@@ -45,7 +45,7 @@ export type AudioPreflightState = {
   tracks: Record<AudioTrackId, AudioPreflightTrackState>;
 };
 
-const DETECTED_LEVEL_THRESHOLD = 0.02;
+const DETECTED_LEVEL_THRESHOLD = 0.18;
 const FRESHNESS_WINDOW_MS = 2000;
 const PEAK_WINDOW_MS = 5000;
 
@@ -62,10 +62,11 @@ export function createAudioPreflightState(
     system: createTrackState("system", input, nowMs),
     microphone: createTrackState("microphone", input, nowMs)
   };
+  const selectedCount = Number(input.enabledSources.system) + Number(input.enabledSources.microphone);
+  const unavailableSelected = tracks.system.status === "unavailable" || tracks.microphone.status === "unavailable";
+  const canStart = selectedCount > 0 && !unavailableSelected;
   const systemDetected = tracks.system.status === "detected";
   const microphoneDetected = tracks.microphone.status === "detected";
-  const selectedCount = Number(input.enabledSources.system) + Number(input.enabledSources.microphone);
-  const canStart = systemDetected || microphoneDetected;
 
   return {
     canStart,
@@ -173,7 +174,7 @@ function createBlockingReason({
     return "Audio probe is unavailable. Check Windows audio permissions or device availability.";
   }
 
-  return "No audio detected yet. Play meeting audio or speak into the microphone before starting.";
+  return null;
 }
 
 function createSummary({

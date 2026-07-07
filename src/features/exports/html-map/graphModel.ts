@@ -15,6 +15,10 @@ export type MeetingGraphNode = {
   title: string;
   body: string;
   parentId?: string;
+  community?: string;
+  degree?: number;
+  radius?: number;
+  weight?: number;
   metadata?: Record<string, string>;
 };
 
@@ -24,6 +28,7 @@ export type MeetingGraphEdge = {
   fromId: string;
   toId: string;
   explicit: boolean;
+  weight?: number;
 };
 
 export type MeetingGraph = {
@@ -85,9 +90,36 @@ export function buildMeetingGraph(structure: MeetingStructure): MeetingGraph {
     }))
   ];
 
-  const graph = { nodes, edges };
+  const graph = enrichMeetingGraph({ nodes, edges });
   assertValidMeetingGraph(graph);
   return graph;
+}
+
+export function enrichMeetingGraph(graph: MeetingGraph): MeetingGraph {
+  const nodeById = new Map(graph.nodes.map((node) => [node.id, node]));
+  const parentById = new Map(graph.nodes.map((node) => [node.id, node.parentId]));
+  const degreeById = new Map(graph.nodes.map((node) => [node.id, 0]));
+  const edges = graph.edges.map((edge) => {
+    degreeById.set(edge.fromId, (degreeById.get(edge.fromId) ?? 0) + 1);
+    degreeById.set(edge.toId, (degreeById.get(edge.toId) ?? 0) + 1);
+    return {
+      ...edge,
+      weight: edge.explicit ? 3 : 1
+    };
+  });
+
+  const nodes = graph.nodes.map((node) => {
+    const degree = degreeById.get(node.id) ?? 0;
+    return {
+      ...node,
+      community: resolveCommunity(node, nodeById, parentById),
+      degree,
+      radius: radiusForNode(node.type, degree),
+      weight: weightForNode(node.type, degree)
+    };
+  });
+
+  return { nodes, edges };
 }
 
 export function assertValidMeetingGraph(graph: MeetingGraph): void {
@@ -129,4 +161,54 @@ function hierarchyEdge(fromId: string, toId: string): MeetingGraphEdge {
 
 function topicHierarchyEdge(node: ChildNode): MeetingGraphEdge[] {
   return node.topicId ? [hierarchyEdge(node.topicId, node.id)] : [];
+}
+
+function resolveCommunity(
+  node: MeetingGraphNode,
+  nodeById: Map<string, MeetingGraphNode>,
+  parentById: Map<string, string | undefined>
+): string {
+  if (node.type === "meeting" || node.type === "topic") {
+    return node.id;
+  }
+
+  let currentId = node.parentId;
+  while (currentId) {
+    const currentNode = nodeById.get(currentId);
+    if (currentNode?.type === "topic") {
+      return currentId;
+    }
+
+    const parentId = parentById.get(currentId);
+    if (!parentId) {
+      return currentId;
+    }
+    currentId = parentId;
+  }
+
+  return node.id;
+}
+
+function radiusForNode(type: MeetingNodeType, degree: number): number {
+  if (type === "meeting") {
+    return 34;
+  }
+
+  if (type === "topic") {
+    return 24 + Math.min(degree, 4);
+  }
+
+  return 17 + Math.min(degree, 3);
+}
+
+function weightForNode(type: MeetingNodeType, degree: number): number {
+  if (type === "meeting") {
+    return 4 + degree;
+  }
+
+  if (type === "topic") {
+    return 2 + degree;
+  }
+
+  return 1 + degree;
 }

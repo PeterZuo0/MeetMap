@@ -76,6 +76,28 @@ test("maps chunk requests to transcript segment responses in request order", asy
   expect(client.requests).toEqual(requests);
 });
 
+test("reports chunk completion progress after each successful chunk", async () => {
+  const client = new FakeTranscriptionClient();
+  const requests = [
+    chunk("system-0001", 0, "system", 0),
+    chunk("system-0002", 1, "system", 10_000)
+  ];
+  const progress = vi.fn();
+
+  await transcribeChunks(client, requests, progress);
+
+  expect(progress).toHaveBeenCalledTimes(2);
+  expect(progress).toHaveBeenNthCalledWith(1, {
+    completedChunks: 1,
+    totalChunks: 2,
+    request: requests[0]
+  });
+  expect(progress).toHaveBeenNthCalledWith(2, {
+    completedChunks: 2,
+    totalChunks: 2,
+    request: requests[1]
+  });
+});
 test("propagates retryable transcription errors with provider-neutral shape", async () => {
   const rateLimitError = createTranscriptionError({
     kind: "rate-limit",
