@@ -90,7 +90,7 @@ jobs:
         run: dotnet publish native/windows-audio/src/MeetMap.WindowsAudio.csproj -c Release
 
       - name: Package Windows directory
-        run: pnpm package:win
+        run: pnpm package:win:dir
 
       - name: Upload packaged app
         uses: actions/upload-artifact@v4
