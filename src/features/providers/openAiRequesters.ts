@@ -8,6 +8,7 @@ import type {
   OpenAiMeetingStructureRequester,
   OpenAiMeetingStructureResponse
 } from "../intelligence/openAiMeetingStructureClient.js";
+import type { LlmApiStyle } from "./llmProviderConfig.js";
 
 const OPENAI_AUDIO_TRANSCRIPTIONS_URL =
   "https://api.openai.com/v1/audio/transcriptions";
@@ -137,6 +138,65 @@ export function createOpenAiMeetingStructureRequester(
   };
 }
 
+export function createOpenAiCompatibleMeetingStructureRequester({
+  apiStyle,
+  baseUrl,
+  fetch: fetchOverride
+}: {
+  apiStyle: LlmApiStyle;
+  baseUrl: string;
+  fetch?: OpenAiFetch;
+}): OpenAiMeetingStructureRequester {
+  const fetchImpl = fetchOverride ?? (globalThis.fetch as OpenAiFetch);
+  const normalizedBaseUrl = baseUrl.replace(/\/+$/, "");
+
+  return async (request) => {
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (request.apiKey) {
+      headers.Authorization = `Bearer ${request.apiKey}`;
+    }
+
+    const isChatCompletions = apiStyle === "chat_completions";
+    const response = await fetchImpl(
+      `${normalizedBaseUrl}/${isChatCompletions ? "chat/completions" : "responses"}`,
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify(isChatCompletions
+          ? {
+              model: request.model,
+              messages: [
+                { role: "system", content: request.instructions },
+                { role: "user", content: request.input }
+              ],
+              response_format: {
+                type: "json_schema",
+                json_schema: {
+                  name: request.text.format.name,
+                  strict: request.text.format.strict,
+                  schema: request.text.format.schema
+                }
+              },
+              temperature: 0
+            }
+          : {
+              model: request.model,
+              instructions: request.instructions,
+              input: request.input,
+              text: request.text
+            })
+      }
+    );
+    const json = await readJsonResponse(response);
+    if (!response.ok) {
+      throw createOpenAiHttpError(json, response.status);
+    }
+    return isChatCompletions
+      ? normalizeChatCompletionsOutput(json)
+      : normalizeResponsesOutput(json);
+  };
+}
+
 async function readJsonResponse(response: OpenAiFetchResponse): Promise<unknown> {
   try {
     return await response.json();
@@ -159,6 +219,18 @@ function normalizeResponsesOutput(json: unknown): OpenAiMeetingStructureResponse
 
   const outputText = findResponsesOutputText(json.output);
   return outputText ? { outputText } : { outputJson: json };
+}
+
+function normalizeChatCompletionsOutput(json: unknown): OpenAiMeetingStructureResponse {
+  if (!isRecord(json) || !Array.isArray(json.choices)) {
+    return {};
+  }
+  const firstChoice = json.choices[0];
+  if (!isRecord(firstChoice) || !isRecord(firstChoice.message)) {
+    return {};
+  }
+  const content = firstChoice.message.content;
+  return typeof content === "string" ? { outputText: content } : {};
 }
 
 function findResponsesOutputText(output: unknown): string | undefined {

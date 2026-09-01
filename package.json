@@ -13,7 +13,9 @@
     "test": "vitest run --passWithNoTests",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.electron.json --noEmit",
     "lint": "eslint .",
-    "package:win": "pnpm build && dotnet publish native/windows-audio/src/MeetMap.WindowsAudio.csproj -c Release && electron-builder --win --dir",
+    "brand:win": "node scripts/brandWindowsExecutable.mjs",
+    "package:win": "pnpm package:win:dir && pnpm brand:win && electron-builder --win --x64 --prepackaged out/win-unpacked",
+    "package:win:dir": "pnpm build && dotnet publish native/windows-audio/src/MeetMap.WindowsAudio.csproj -c Release && electron-builder --win --dir --x64",
     "smoke:production": "pnpm build && node dist-electron/scripts/productionSmoke.js"
   },
   "build": {
@@ -34,13 +36,36 @@
         "filter": [
           "meetmap-windows-audio.exe"
         ]
+      },
+      {
+        "from": "build/meetmap.ico",
+        "to": "assets/meetmap.ico"
       }
     ],
     "win": {
+      "icon": "build/meetmap.ico",
       "signAndEditExecutable": false,
       "target": [
-        "dir"
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
       ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "MeetMap"
     }
   },
   "dependencies": {
@@ -64,6 +89,7 @@
     "eslint-plugin-react-refresh": "^0.4.24",
     "globals": "^16.5.0",
     "jsdom": "^27.2.0",
+    "resedit": "3.1.0",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.46.4",
     "vite": "^7.2.4",

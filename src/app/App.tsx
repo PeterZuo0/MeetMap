@@ -1,190 +1,148 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { MeetingMetadata, ProcessingStep, SummaryStyle } from "../features/meetings/meetingTypes";
+import type { AudioPreflightLevelSample } from "../features/audio-analysis/audioPreflight";
+import { createAudioPreflightState } from "../features/audio-analysis/audioPreflight";
+import type { MeetingMetadata, ProcessingStep } from "../features/meetings/meetingTypes";
+import type { LocalizedMeetingAnalysis } from "../features/intelligence/meetingStructure";
 import type { LanguageOptionValue } from "../features/settings/languageOptions";
+import { LANGUAGE_OPTIONS } from "../features/settings/languageOptions";
 import type { ProcessingPreferences } from "../features/settings/processingPreferences";
-import {
-  createAudioPreflightState,
-  type AudioPreflightLevelSample
-} from "../features/audio-analysis/audioPreflight";
+import { DEFAULT_APP_SETTINGS } from "../features/settings/appSettings";
+import type {
+  LlmProviderState,
+  SaveLlmProviderInput
+} from "../features/providers/llmProviderConfig";
 import type {
   AppSettings,
-  ExportOptions,
   MeetingDetailData,
-  MeetingSearchResult,
   ProcessingProgressUpdate,
   RecordingAudioDevice,
   RecordingAudioLevel,
   RecordingAudioSources,
   SettingsRuntimeStatus,
-  TaggedMomentInput,
-  WorkspaceState,
-  WorkflowPhase
+  WorkspaceState
 } from "./meetMapApi";
-import { DetailScreen } from "./ui/DetailScreen";
-import { LibraryScreen } from "./ui/LibraryScreen";
-import { MeetMapShell } from "./ui/MeetMapShell";
-import { PreRecordingScreen } from "./ui/PreRecordingScreen";
-import { ProcessingScreen } from "./ui/ProcessingScreen";
-import { RecordingScreen } from "./ui/RecordingScreen";
-import { SettingsScreen, type SettingsSectionId } from "./ui/SettingsScreen";
-import { DEFAULT_APP_SETTINGS } from "./ui/theme";
-import { WorkspaceScreen } from "./ui/WorkspaceScreen";
+import "./ui/transcriptionApp.css";
+
+type AppView =
+  | "home"
+  | "live-setup"
+  | "recording"
+  | "import"
+  | "processing"
+  | "settings"
+  | "transcript";
+
+type AudioTrack = "system" | "microphone";
+type ProcessingMode = "transcription" | "analysis";
 
 export function App() {
   const api = window.meetMap;
-  const hasWorkspaceApi = Boolean(api?.getWorkspace);
+  const [view, setView] = useState<AppView>("home");
+  const [workspace, setWorkspace] = useState<WorkspaceState | null>(null);
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_APP_SETTINGS);
-  const [phase, setPhase] = useState<WorkflowPhase>("library");
-  const [workspace, setWorkspace] = useState<WorkspaceState | null>(() => (
-    hasWorkspaceApi
-      ? null
-      : {
-          currentPath: "Local browser session",
-          recentPaths: []
-        }
-  ));
-  const [isWorkspaceLoading, setIsWorkspaceLoading] = useState(hasWorkspaceApi);
-  const [isChoosingWorkspace, setIsChoosingWorkspace] = useState(false);
-  const [settingsRuntimeStatus, setSettingsRuntimeStatus] = useState<SettingsRuntimeStatus | null>(null);
-  const [libraryMeetings, setLibraryMeetings] = useState<MeetingMetadata[]>([]);
+  const [runtimeStatus, setRuntimeStatus] = useState<SettingsRuntimeStatus | null>(null);
+  const [meetings, setMeetings] = useState<MeetingMetadata[]>([]);
   const [meeting, setMeeting] = useState<MeetingMetadata | null>(null);
-  const [draftTitle, setDraftTitle] = useState("Untitled meeting");
-  const [draftOutputLanguage, setDraftOutputLanguage] = useState<LanguageOptionValue>(
-    settings.defaultOutputLanguage
-  );
-  const [draftSummaryStyle, setDraftSummaryStyle] = useState<SummaryStyle>("decisions_actions");
-  const [draftAudioSources, setDraftAudioSources] = useState<RecordingAudioSources>({
+  const [detail, setDetail] = useState<MeetingDetailData | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isChoosingWorkspace, setIsChoosingWorkspace] = useState(false);
+  const [isStarting, setIsStarting] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
+  const [isStopping, setIsStopping] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
+  const [isPauseChanging, setIsPauseChanging] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [title, setTitle] = useState("未命名会议");
+  const [outputLanguage, setOutputLanguage] = useState<LanguageOptionValue>("bilingual");
+  const [audioSources, setAudioSources] = useState<RecordingAudioSources>({
     system: true,
     microphone: true
   });
   const [audioDevices, setAudioDevices] = useState<RecordingAudioDevice[]>([]);
-  const [selectedAudioDeviceIds, setSelectedAudioDeviceIds] = useState<Partial<Record<"system" | "microphone", string>>>({});
-  const [activeAudioSources, setActiveAudioSources] = useState<RecordingAudioSources>({
-    system: true,
-    microphone: true
-  });
-  const [recordingLevels, setRecordingLevels] = useState<Partial<Record<"system" | "microphone", RecordingAudioLevel[]>>>({});
-  const [preflightLevels, setPreflightLevels] = useState<Partial<Record<"system" | "microphone", AudioPreflightLevelSample[]>>>({});
-  const [preflightUnavailableTracks, setPreflightUnavailableTracks] = useState<Partial<Record<"system" | "microphone", string>>>({});
+  const [selectedDeviceIds, setSelectedDeviceIds] = useState<Partial<Record<AudioTrack, string>>>({});
+  const [preflightLevels, setPreflightLevels] = useState<Partial<Record<AudioTrack, AudioPreflightLevelSample[]>>>({});
+  const [recordingLevels, setRecordingLevels] = useState<Partial<Record<AudioTrack, RecordingAudioLevel[]>>>({});
+  const [unavailableTracks, setUnavailableTracks] = useState<Partial<Record<AudioTrack, string>>>({});
   const [preflightNow, setPreflightNow] = useState(() => new Date().toISOString());
-  const [isStarting, setIsStarting] = useState(false);
-  const [isImportingAudio, setIsImportingAudio] = useState(false);
-  const [isStopping, setIsStopping] = useState(false);
-  const [isRecordingPaused, setIsRecordingPaused] = useState(false);
-  const [isPauseChanging, setIsPauseChanging] = useState(false);
-  const [activeStep, setActiveStep] = useState<ProcessingStep>("activity_detection");
   const [processingProgress, setProcessingProgress] = useState<ProcessingProgressUpdate | null>(null);
-  const [settingsInitialSection, setSettingsInitialSection] = useState<SettingsSectionId>("general");
-  const [error, setError] = useState<string | null>(null);
-  const [exportError, setExportError] = useState<string | null>(null);
-  const [isSearchOpen, setIsSearchOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [searchResults, setSearchResults] = useState<MeetingSearchResult[]>([]);
-  const [isSearching, setIsSearching] = useState(false);
-  const [detailDataState, setDetailDataState] = useState<{
-    meetingId: string;
-    data: MeetingDetailData | null;
-    error: string | null;
-  } | null>(null);
-  const preflightProbeActiveRef = useRef(false);
-  const meetingId = meeting?.id;
-  const meetingStatus = meeting?.status;
-
-  const refreshLibraryMeetings = useCallback(async () => {
-    if (!api?.listMeetings) {
-      setLibraryMeetings([]);
-      return;
-    }
-
-    setLibraryMeetings(await api.listMeetings());
-  }, [api]);
+  const [processingMode, setProcessingMode] = useState<ProcessingMode>("transcription");
+  const [meetingOrigin, setMeetingOrigin] = useState<"import" | "recording" | null>(null);
+  const probeActiveRef = useRef(false);
+  const activeViewRef = useRef<AppView>(view);
+  const settingsReturnViewRef = useRef<AppView>("home");
 
   useEffect(() => {
-    document.body.classList.toggle("theme-dark", settings.theme === "dark");
-    document.body.classList.toggle("theme-light", settings.theme !== "dark");
-    document.documentElement.style.setProperty("--accent", settings.accent);
-    document.documentElement.style.setProperty("--accent-text", settings.accent);
-    document.documentElement.style.setProperty("--accent-soft", `${settings.accent}1f`);
-  }, [settings]);
+    activeViewRef.current = view;
+  }, [view]);
 
   useEffect(() => {
-    let cancelled = false;
-
-    if (api?.getSettings) {
-      void api.getSettings().then((loadedSettings) => {
-        if (!cancelled) {
-          setSettings(loadedSettings);
-          setDraftOutputLanguage(loadedSettings.defaultOutputLanguage);
-          setSelectedAudioDeviceIds({
-            system: loadedSettings.defaultSystemAudioDeviceId ?? undefined,
-            microphone: loadedSettings.defaultMicrophoneDeviceId ?? undefined
-          });
-        }
-      }).catch((caughtError) => {
-        if (!cancelled) {
-          setError(formatError(caughtError));
-        }
-      });
-    }
-
-    if (api?.getSettingsRuntimeStatus) {
-      void api.getSettingsRuntimeStatus().then((status) => {
-        if (!cancelled) {
-          setSettingsRuntimeStatus(status);
-        }
-      }).catch((caughtError) => {
-        if (!cancelled) {
-          setSettingsRuntimeStatus({
-            openAi: {
-              configured: false,
-              source: `runtime status unavailable: ${formatError(caughtError)}`,
-              structureModel: "-",
-              transcriptionModel: "-"
-            }
-          });
-        }
-      });
-    }
-
-    return () => {
-      cancelled = true;
-    };
-  }, [api]);
-
-  useEffect(() => {
-    if (!api?.getWorkspace) {
-      return;
-    }
-
-    let cancelled = false;
-    void api.getWorkspace().then(async (state) => {
-      if (cancelled) {
+    return api?.onOpenSettings?.(() => {
+      const currentView = activeViewRef.current;
+      if (currentView === "recording" || currentView === "processing") {
+        setError("录音或处理期间暂时不能打开设置。");
         return;
       }
 
-      setWorkspace(state);
-      setPhase(state.currentPath ? "library" : "workspace");
-      if (state.currentPath) {
-        await refreshLibraryMeetings();
-      }
-    }).catch((caughtError) => {
-      if (!cancelled) {
-        setError(formatError(caughtError));
-        setPhase("workspace");
-      }
-    }).finally(() => {
-      if (!cancelled) {
-        setIsWorkspaceLoading(false);
-      }
+      settingsReturnViewRef.current = currentView === "settings" ? "home" : currentView;
+      setError(null);
+      activeViewRef.current = "settings";
+      setView("settings");
     });
+  }, [api]);
 
+  const refreshMeetings = useCallback(async () => {
+    if (!api?.listMeetings) {
+      setMeetings([]);
+      return;
+    }
+
+    setMeetings(await api.listMeetings());
+  }, [api]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function load() {
+      try {
+        const [workspaceState, loadedSettings, providerStatus] = await Promise.all([
+          api?.getWorkspace?.() ?? Promise.resolve({ currentPath: "本地浏览器会话", recentPaths: [] }),
+          api?.getSettings?.() ?? Promise.resolve(DEFAULT_APP_SETTINGS),
+          api?.getSettingsRuntimeStatus?.() ?? Promise.resolve(null)
+        ]);
+        if (cancelled) {
+          return;
+        }
+
+        setWorkspace(workspaceState);
+        setSettings(loadedSettings);
+        setOutputLanguage(loadedSettings.defaultOutputLanguage);
+        setSelectedDeviceIds({
+          system: loadedSettings.defaultSystemAudioDeviceId ?? undefined,
+          microphone: loadedSettings.defaultMicrophoneDeviceId ?? undefined
+        });
+        setRuntimeStatus(providerStatus);
+        if (workspaceState.currentPath) {
+          await refreshMeetings();
+        }
+      } catch (caughtError) {
+        if (!cancelled) {
+          setError(formatError(caughtError));
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoading(false);
+        }
+      }
+    }
+
+    void load();
     return () => {
       cancelled = true;
     };
-  }, [api, refreshLibraryMeetings]);
+  }, [api, refreshMeetings]);
 
   useEffect(() => {
-    if ((phase !== "pre" && phase !== "settings") || !api?.listAudioDevices) {
+    if (view !== "live-setup" || !api?.listAudioDevices) {
       return;
     }
 
@@ -195,16 +153,20 @@ export function App() {
       }
 
       setAudioDevices(devices);
-      setSelectedAudioDeviceIds((current) => ({
-        system: current.system ?? settings.defaultSystemAudioDeviceId ?? devices.find((device) => device.track === "system")?.id,
-        microphone: current.microphone ?? settings.defaultMicrophoneDeviceId ?? devices.find((device) => device.track === "microphone")?.id
+      setSelectedDeviceIds((current) => ({
+        system: current.system ?? devices.find((device) => device.track === "system")?.id,
+        microphone: current.microphone ?? devices.find((device) => device.track === "microphone")?.id
       }));
+    }).catch((caughtError) => {
+      if (!cancelled) {
+        setError(formatError(caughtError));
+      }
     });
 
     return () => {
       cancelled = true;
     };
-  }, [api, phase, settings.defaultMicrophoneDeviceId, settings.defaultSystemAudioDeviceId]);
+  }, [api, view]);
 
   useEffect(() => {
     if (!api?.onAudioLevel) {
@@ -213,487 +175,100 @@ export function App() {
 
     return api.onAudioLevel((update) => {
       if (update.source === "preflight") {
-        setPreflightLevels((current) => appendPreflightSample(current, update));
-        return;
+        setPreflightLevels((current) => appendLevel(current, update));
+      } else {
+        setRecordingLevels((current) => appendLevel(current, update));
       }
-
-      setRecordingLevels((current) => appendRecordingLevel(current, update));
     });
   }, [api]);
+
   useEffect(() => {
     if (!api?.onProcessingProgress) {
       return;
     }
 
     return api.onProcessingProgress((update) => {
-      if (meetingId && update.meetingId !== meetingId) {
-        return;
+      if (meeting?.id && update.meetingId === meeting.id) {
+        setProcessingProgress(update);
       }
-
-      setProcessingProgress(update);
-      setActiveStep(update.step);
     });
-  }, [api, meetingId]);
+  }, [api, meeting?.id]);
 
   useEffect(() => {
-    if (phase !== "pre") {
+    if (view !== "live-setup") {
       return;
     }
 
-    const interval = window.setInterval(() => {
-      setPreflightNow(new Date().toISOString());
-    }, 500);
-
-    return () => window.clearInterval(interval);
-  }, [phase]);
+    const timer = window.setInterval(() => setPreflightNow(new Date().toISOString()), 500);
+    return () => window.clearInterval(timer);
+  }, [view]);
 
   useEffect(() => {
-    if (!isSearchOpen) {
-      return;
-    }
-
-    const normalizedQuery = searchQuery.trim();
-    if (normalizedQuery.length < 2) {
+    if (view !== "live-setup" || !api?.startAudioProbe) {
       return;
     }
 
     let cancelled = false;
-    const timeoutId = window.setTimeout(() => {
-      setIsSearching(true);
-      const searchPromise = api?.searchMeetings
-        ? api.searchMeetings(normalizedQuery)
-        : Promise.resolve(searchLocalMeetings(libraryMeetings, normalizedQuery));
-
-      void searchPromise.then((results) => {
-        if (!cancelled) {
-          setSearchResults(results);
-        }
-      }).catch((caughtError) => {
-        if (!cancelled) {
-          setError(formatError(caughtError));
-          setSearchResults([]);
-        }
-      }).finally(() => {
-        if (!cancelled) {
-          setIsSearching(false);
-        }
-      });
-    }, 180);
-
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timeoutId);
-    };
-  }, [api, isSearchOpen, libraryMeetings, searchQuery]);
-
-  useEffect(() => {
-    if (phase !== "pre" || !api?.startAudioProbe) {
-      return;
-    }
-
-    let cancelled = false;
-    void api.startAudioProbe({
-      audioSources: draftAudioSources,
-      deviceIds: selectedAudioDeviceIds
-    }).then(() => {
+    void api.startAudioProbe({ audioSources, deviceIds: selectedDeviceIds }).then(() => {
       if (cancelled) {
         void api.stopAudioProbe?.();
         return;
       }
-      preflightProbeActiveRef.current = true;
+      probeActiveRef.current = true;
     }).catch((caughtError) => {
       if (cancelled) {
         return;
       }
-
       const message = formatError(caughtError);
-      setPreflightUnavailableTracks({
-        system: draftAudioSources.system ? message : undefined,
-        microphone: draftAudioSources.microphone ? message : undefined
+      setUnavailableTracks({
+        system: audioSources.system ? message : undefined,
+        microphone: audioSources.microphone ? message : undefined
       });
       setError(message);
     });
 
     return () => {
       cancelled = true;
-      if (preflightProbeActiveRef.current) {
-        preflightProbeActiveRef.current = false;
+      if (probeActiveRef.current) {
+        probeActiveRef.current = false;
         void api.stopAudioProbe?.();
       }
     };
-  }, [
-    api,
-    phase,
-    draftAudioSources,
-    selectedAudioDeviceIds
-  ]);
+  }, [api, audioSources, selectedDeviceIds, view]);
 
   useEffect(() => {
-    if (phase !== "detail" || !meetingId || meetingStatus === "no_audio") {
-      return;
-    }
-
-    if (!api?.getMeetingDetailData) {
+    if (view !== "transcript" || !meeting?.id || !api?.getMeetingDetailData) {
       return;
     }
 
     let cancelled = false;
-
-    void api.getMeetingDetailData(meetingId).then((data) => {
+    void api.getMeetingDetailData(meeting.id).then((data) => {
       if (!cancelled) {
-        setDetailDataState({ meetingId, data, error: null });
+        setDetail(data);
       }
     }).catch((caughtError) => {
       if (!cancelled) {
-        setDetailDataState({ meetingId, data: null, error: formatError(caughtError) });
+        setError(formatError(caughtError));
       }
     });
 
     return () => {
       cancelled = true;
     };
-  }, [api, phase, meetingId, meetingStatus]);
+  }, [api, meeting?.id, view]);
 
-  const crumbs = useMemo(() => {
-    switch (phase) {
-      case "workspace":
-        return ["MeetMap", "Workspace"];
-      case "library":
-        return ["MeetMap", "All meetings"];
-      case "pre":
-        return ["MeetMap", "New recording"];
-      case "recording":
-        return ["MeetMap", "Recording"];
-      case "processing":
-        return ["MeetMap", "Processing"];
-      case "detail":
-        return ["MeetMap", "Meeting detail"];
-      case "settings":
-        return ["MeetMap", "Settings"];
-    }
-  }, [phase]);
-
-  const recordingActive = meeting?.status === "recording";
-  const displayedAudioSources = activeAudioSources;
-  const currentDetailState = phase === "detail" && meetingId === detailDataState?.meetingId ? detailDataState : null;
-  const currentDetailData = currentDetailState?.data ?? null;
-  const currentDetailError = currentDetailState?.error ?? null;
-  const audioPreflight = createAudioPreflightState({
-    enabledSources: draftAudioSources,
+  const preflight = useMemo(() => createAudioPreflightState({
+    enabledSources: audioSources,
     now: preflightNow,
-    samples: api?.startAudioProbe ? preflightLevels : createFallbackPreflightSamples(draftAudioSources, preflightNow),
-    unavailableTracks: preflightUnavailableTracks
-  });
-  const searchHasEnoughInput = searchQuery.trim().length >= 2;
-  const visibleSearchResults = searchHasEnoughInput ? searchResults : [];
-  const visibleIsSearching = searchHasEnoughInput && isSearching;
+    samples: api?.startAudioProbe
+      ? preflightLevels
+      : createFallbackLevels(audioSources, preflightNow),
+    unavailableTracks
+  }), [api?.startAudioProbe, audioSources, preflightLevels, preflightNow, unavailableTracks]);
 
-  function navigate(nextPhase: WorkflowPhase) {
-    if (nextPhase !== "workspace" && !workspace?.currentPath) {
-      setPhase("workspace");
-      return;
-    }
-
-    setError(null);
-    setExportError(null);
-    setPhase(nextPhase);
-    if (nextPhase === "pre") {
-      setDraftOutputLanguage(settings.defaultOutputLanguage);
-      setDraftAudioSources({ system: true, microphone: true });
-      resetPreflightState();
-    }
-    if (nextPhase === "settings") {
-      setSettingsInitialSection("general");
-    }
-  }
-
-  function openSettings(section: SettingsSectionId = "general") {
-    setSettingsInitialSection(section);
-    setError(null);
-    setExportError(null);
-    setPhase("settings");
-  }
-
-  function openLibraryMeeting(meetingId: string) {
-    const selectedMeeting = libraryMeetings.find((item) => item.id === meetingId);
-    if (!selectedMeeting) {
-      return;
-    }
-
-    setError(null);
-    setExportError(null);
-    setDetailDataState(null);
-    setMeeting(selectedMeeting);
-    setActiveStep(selectedMeeting.processingStep ?? "activity_detection");
-    setProcessingProgress(null);
-
-    if (selectedMeeting.status === "processing" || selectedMeeting.status === "recording" || selectedMeeting.status === "recorded") {
-      setPhase("processing");
-      return;
-    }
-
-    setPhase("detail");
-  }
-
-  async function startRecording() {
-    if (!api) {
-      setError("MeetMap desktop API is unavailable");
-      return;
-    }
-
-    const title = draftTitle.trim() || `Untitled meeting · ${new Date().toLocaleDateString()}`;
-
-    setIsStarting(true);
-    setError(null);
-    try {
-      if (api.stopAudioProbe && preflightProbeActiveRef.current) {
-        preflightProbeActiveRef.current = false;
-        await api.stopAudioProbe();
-      }
-      const createdMeeting = await api.createMeeting({
-        title,
-        outputLanguage: draftOutputLanguage,
-        summaryStyle: draftSummaryStyle
-      });
-      const recordingMeeting = await api.startRecording(createdMeeting.id, {
-        audioSources: draftAudioSources,
-        deviceIds: selectedAudioDeviceIds
-      });
-      setActiveAudioSources(draftAudioSources);
-      setRecordingLevels({});
-      setIsRecordingPaused(false);
-      setMeeting(recordingMeeting);
-      setPhase("recording");
-    } catch (caughtError) {
-      setError(formatError(caughtError));
-    } finally {
-      setIsStarting(false);
-    }
-  }
-
-  async function importAudio() {
-    if (!api?.importAudio) {
-      setError("Audio import is not available in this runtime");
-      return;
-    }
-
-    setIsImportingAudio(true);
-    setError(null);
-    try {
-      const importedMeeting = await api.importAudio({
-        outputLanguage: settings.defaultOutputLanguage,
-        summaryStyle: "decisions_actions"
-      });
-
-      if (!importedMeeting) {
-        return;
-      }
-
-      setMeeting(importedMeeting);
-      setActiveAudioSources({ system: true, microphone: false });
-      setActiveStep("activity_detection");
-      setProcessingProgress(createInitialProcessingProgress(importedMeeting.id));
-      setPhase("processing");
-      void processCurrentMeeting(importedMeeting.id);
-    } catch (caughtError) {
-      setError(formatError(caughtError));
-    } finally {
-      setIsImportingAudio(false);
-    }
-  }
-
-  async function stopRecording() {
-    if (!api) {
-      setError("MeetMap desktop API is unavailable");
-      return;
-    }
-
-    setIsStopping(true);
-    setError(null);
-    try {
-      const recordedMeeting = await api.stopRecording();
-      setMeeting(recordedMeeting);
-      setIsRecordingPaused(false);
-      setActiveStep("activity_detection");
-      setProcessingProgress(createInitialProcessingProgress(recordedMeeting.id));
-      setPhase("processing");
-      void processCurrentMeeting(recordedMeeting.id);
-    } catch (caughtError) {
-      setError(formatError(caughtError));
-    } finally {
-      setIsStopping(false);
-    }
-  }
-
-  async function processCurrentMeeting(meetingId: string) {
-    if (!api) {
-      setError("MeetMap desktop API is unavailable");
-      return;
-    }
-
-    setProcessingProgress(createInitialProcessingProgress(meetingId));
-
-    try {
-      const processedMeeting = await api.processMeeting(meetingId, buildProcessingPreferences(settings));
-      setMeeting(processedMeeting);
-      setActiveStep(processedMeeting.processingStep ?? "completed");
-      setProcessingProgress(createCompletedProcessingProgress(processedMeeting.id));
-      await refreshLibraryMeetings();
-      setPhase("detail");
-    } catch (caughtError) {
-      setError(formatError(caughtError));
-    }
-  }
-
-  async function setRecordingPaused(nextPaused: boolean) {
-    if (!api) {
-      setError("MeetMap desktop API is unavailable");
-      return;
-    }
-
-    const pauseAction = nextPaused ? api.pauseRecording : api.resumeRecording;
-    if (!pauseAction) {
-      setError("Recording pause is not available in this runtime");
-      return;
-    }
-
-    setIsPauseChanging(true);
-    setError(null);
-    try {
-      await pauseAction();
-      setIsRecordingPaused(nextPaused);
-    } catch (caughtError) {
-      setError(formatError(caughtError));
-    } finally {
-      setIsPauseChanging(false);
-    }
-  }
-
-  async function openExport(kind: "word" | "html", options?: ExportOptions) {
-    if (!api || !meeting) {
-      setExportError("Export is not available yet");
-      return;
-    }
-
-    setExportError(null);
-    try {
-      await api.openExport({ meetingId: meeting.id, kind, options });
-    } catch (caughtError) {
-      setExportError(formatError(caughtError));
-    }
-  }
-
-  async function openMeetingExport(meetingId: string, kind: "word" | "html") {
-    if (!api?.openExport) {
-      setExportError("Export is not available yet");
-      return;
-    }
-
-    setExportError(null);
-    try {
-      await api.openExport({ meetingId, kind });
-    } catch (caughtError) {
-      setExportError(formatError(caughtError));
-    }
-  }
-
-  async function shareCurrentMeeting() {
-    if (!meeting) {
-      throw new Error("No meeting is selected");
-    }
-
-    const shareText = [
-      `MeetMap meeting: ${meeting.title}`,
-      `Status: ${meeting.status}`,
-      meeting.transcriptPath ? `Transcript: ${meeting.transcriptPath}` : undefined,
-      meeting.structurePath ? `Structure: ${meeting.structurePath}` : undefined,
-      meeting.exportPaths.wordSummaryPath ? `Word: ${meeting.exportPaths.wordSummaryPath}` : undefined,
-      meeting.exportPaths.htmlMeetingMapPath ? `HTML map: ${meeting.exportPaths.htmlMeetingMapPath}` : undefined
-    ].filter((item): item is string => Boolean(item)).join("\n");
-
-    await copyTextToClipboard(shareText);
-  }
-
-  function regenerateCurrentMeeting() {
-    if (!meeting) {
-      setExportError("No meeting is selected");
-      return;
-    }
-
-    setError(null);
-    setProcessingProgress(createInitialProcessingProgress(meeting.id));
-    setActiveStep("activity_detection");
-    setPhase("processing");
-    void processCurrentMeeting(meeting.id);
-  }
-
-  function openProcessingPreview() {
-    if (!meeting || !canPreviewMeeting(meeting)) {
-      setError("Preview is not available until a transcript, structure, or completed result exists.");
-      return;
-    }
-
-    setError(null);
-    setDetailDataState(null);
-    setPhase("detail");
-  }
-
-  async function saveMeetingAudio() {
-    if (!api?.saveMeetingAudio || !meeting) {
-      setExportError("Audio download is not available yet");
-      return;
-    }
-
-    setExportError(null);
-    try {
-      await api.saveMeetingAudio(meeting.id);
-    } catch (caughtError) {
-      setExportError(formatError(caughtError));
-    }
-  }
-
-  async function saveTaggedMoment(moment: TaggedMomentInput) {
-    if (!api?.saveTaggedMoment || !meeting) {
-      return;
-    }
-
-    try {
-      await api.saveTaggedMoment(meeting.id, moment);
-    } catch (caughtError) {
-      setError(formatError(caughtError));
-    }
-  }
-
-  async function revealMeetingFolder(meetingId: string) {
-    if (!api?.revealMeetingFolder) {
-      setError("Meeting folder reveal is not available in this runtime");
-      return;
-    }
-
-    setError(null);
-    try {
-      await api.revealMeetingFolder(meetingId);
-    } catch (caughtError) {
-      setError(formatError(caughtError));
-    }
-  }
-
-  function reprocessMeeting(meetingId: string) {
-    const selectedMeeting = libraryMeetings.find((item) => item.id === meetingId);
-    if (selectedMeeting) {
-      setMeeting(selectedMeeting);
-    }
-
-    setError(null);
-    setActiveStep("activity_detection");
-    setProcessingProgress(createInitialProcessingProgress(meetingId));
-    setPhase("processing");
-    void processCurrentMeeting(meetingId);
-  }
-
-  async function chooseWorkspaceFolder() {
+  async function chooseWorkspace() {
     if (!api?.chooseWorkspaceFolder) {
-      setError("Workspace picker is unavailable in this runtime");
+      setError("当前运行环境无法选择保存位置。");
       return;
     }
 
@@ -703,8 +278,7 @@ export function App() {
       const nextWorkspace = await api.chooseWorkspaceFolder();
       setWorkspace(nextWorkspace);
       if (nextWorkspace.currentPath) {
-        setPhase("library");
-        await refreshLibraryMeetings();
+        await refreshMeetings();
       }
     } catch (caughtError) {
       setError(formatError(caughtError));
@@ -713,357 +287,1903 @@ export function App() {
     }
   }
 
-  async function selectWorkspaceFolder(folderPath: string) {
-    if (!api?.useWorkspaceFolder) {
-      setError("Workspace picker is unavailable in this runtime");
-      return;
-    }
-
-    setIsChoosingWorkspace(true);
-    setError(null);
+  async function revealWorkspace() {
     try {
-      const nextWorkspace = await api.useWorkspaceFolder(folderPath);
-      setWorkspace(nextWorkspace);
-      setPhase("library");
-      await refreshLibraryMeetings();
-    } catch (caughtError) {
-      setError(formatError(caughtError));
-    } finally {
-      setIsChoosingWorkspace(false);
-    }
-  }
-
-  async function revealWorkspaceFolder() {
-    if (!api?.revealWorkspaceFolder) {
-      return;
-    }
-
-    setError(null);
-    try {
-      await api.revealWorkspaceFolder();
+      await api?.revealWorkspaceFolder?.();
     } catch (caughtError) {
       setError(formatError(caughtError));
     }
   }
 
-  async function updateSettings(nextSettings: AppSettings) {
-    setSettings(nextSettings);
-    if (phase === "pre") {
-      setDraftOutputLanguage(nextSettings.defaultOutputLanguage);
+  function openLiveSetup() {
+    if (!workspace?.currentPath) {
+      setError("请先选择文件保存位置。");
+      return;
     }
-
-    setSelectedAudioDeviceIds((current) => ({
-      ...current,
-      system: nextSettings.defaultSystemAudioDeviceId ?? current.system,
-      microphone: nextSettings.defaultMicrophoneDeviceId ?? current.microphone
-    }));
-
-    if (api?.updateSettings) {
-      try {
-        setSettings(await api.updateSettings(nextSettings));
-      } catch (caughtError) {
-        setError(formatError(caughtError));
-      }
-    }
-  }
-
-  function resetPreflightState() {
+    setError(null);
+    setTitle(`即时会议 ${new Date().toLocaleDateString("zh-CN")}`);
+    setAudioSources({ system: true, microphone: true });
     setPreflightLevels({});
-    setPreflightUnavailableTracks({});
-    setPreflightNow(new Date().toISOString());
+    setUnavailableTracks({});
+    setView("live-setup");
+  }
+
+  async function startRecording() {
+    if (!api) {
+      setError("桌面录音服务不可用。");
+      return;
+    }
+
+    setIsStarting(true);
+    setError(null);
+    try {
+      if (probeActiveRef.current) {
+        probeActiveRef.current = false;
+        await api.stopAudioProbe?.();
+      }
+      const created = await api.createMeeting({
+        title: title.trim() || "未命名会议",
+        outputLanguage,
+        summaryStyle: "decisions_actions"
+      });
+      const recording = await api.startRecording(created.id, {
+        audioSources,
+        deviceIds: selectedDeviceIds
+      });
+      setMeeting(recording);
+      setMeetingOrigin("recording");
+      setRecordingLevels({});
+      setIsPaused(false);
+      setView("recording");
+    } catch (caughtError) {
+      setError(formatError(caughtError));
+    } finally {
+      setIsStarting(false);
+    }
+  }
+
+  async function changePauseState() {
+    if (!api) {
+      return;
+    }
+
+    setIsPauseChanging(true);
+    setError(null);
+    try {
+      if (isPaused) {
+        await api.resumeRecording?.();
+      } else {
+        await api.pauseRecording?.();
+      }
+      setIsPaused(!isPaused);
+    } catch (caughtError) {
+      setError(formatError(caughtError));
+    } finally {
+      setIsPauseChanging(false);
+    }
+  }
+
+  async function stopRecording() {
+    if (!api) {
+      return;
+    }
+
+    setIsStopping(true);
+    setError(null);
+    try {
+      const recorded = await api.stopRecording();
+      setMeeting(recorded);
+      setIsPaused(false);
+      await processMeeting(recorded);
+    } catch (caughtError) {
+      setError(formatError(caughtError));
+    } finally {
+      setIsStopping(false);
+    }
+  }
+
+  async function leaveRecording(destination: "home" | "live-setup") {
+    if (!api || isStopping) {
+      return;
+    }
+
+    const shouldLeave = window.confirm("离开录音页面会结束当前录音并保存音频，但不会自动开始转写。是否继续？");
+    if (!shouldLeave) {
+      return;
+    }
+
+    setIsStopping(true);
+    setError(null);
+    try {
+      const recorded = await api.stopRecording();
+      setMeeting(recorded);
+      setIsPaused(false);
+      if (destination === "home") {
+        returnHome();
+      } else {
+        activeViewRef.current = "live-setup";
+        setView("live-setup");
+      }
+    } catch (caughtError) {
+      setError(formatError(caughtError));
+    } finally {
+      setIsStopping(false);
+    }
+  }
+
+  async function importWithPicker() {
+    if (!api?.importAudio) {
+      setError("当前运行环境无法导入音频。");
+      return;
+    }
+
+    setIsImporting(true);
+    setError(null);
+    try {
+      const imported = await api.importAudio({
+        outputLanguage,
+        summaryStyle: "decisions_actions"
+      });
+      if (imported) {
+        setMeeting(imported);
+        setMeetingOrigin("import");
+      }
+    } catch (caughtError) {
+      setError(formatError(caughtError));
+    } finally {
+      setIsImporting(false);
+    }
+  }
+
+  async function importDroppedFile(file: File) {
+    if (!api?.importDroppedAudio) {
+      setError("拖放导入暂不可用，请点击选择音频文件。");
+      return;
+    }
+
+    if (!/\.(wav|m4a)$/i.test(file.name)) {
+      setError("目前仅支持 WAV 和 M4A 音频。");
+      return;
+    }
+
+    setIsImporting(true);
+    setError(null);
+    try {
+      const imported = await api.importDroppedAudio(file, {
+        outputLanguage,
+        summaryStyle: "decisions_actions"
+      });
+      setMeeting(imported);
+      setMeetingOrigin("import");
+    } catch (caughtError) {
+      setError(formatError(caughtError));
+    } finally {
+      setIsImporting(false);
+    }
+  }
+
+  async function processMeeting(target: MeetingMetadata) {
+    if (!api) {
+      return;
+    }
+
+    activeViewRef.current = "processing";
+    setProcessingMode("transcription");
+    setView("processing");
+    setProcessingProgress(createInitialProgress(target.id, "transcription"));
+    setError(null);
+    try {
+      const processed = await api.processMeeting(target.id, buildProcessingPreferences(settings));
+      setMeeting(processed);
+      setDetail(null);
+      await refreshMeetings();
+      if (activeViewRef.current === "processing") {
+        activeViewRef.current = "transcript";
+        setView("transcript");
+      } else if (activeViewRef.current === "transcript" && api.getMeetingDetailData) {
+        setDetail(await api.getMeetingDetailData(target.id));
+      }
+    } catch (caughtError) {
+      setError(formatError(caughtError));
+    }
+  }
+
+  async function analyzeMeeting(target: MeetingMetadata) {
+    if (!api?.analyzeMeeting) {
+      setError("当前运行环境无法进行 AI 分析。");
+      return;
+    }
+
+    activeViewRef.current = "processing";
+    setProcessingMode("analysis");
+    setView("processing");
+    setProcessingProgress(createInitialProgress(target.id, "analysis"));
+    setError(null);
+    try {
+      const analyzed = await api.analyzeMeeting(
+        target.id,
+        buildProcessingPreferences(settings, false)
+      );
+      setMeeting(analyzed);
+      setDetail(null);
+      await refreshMeetings();
+      if (activeViewRef.current === "processing") {
+        activeViewRef.current = "transcript";
+        setView("transcript");
+      } else if (activeViewRef.current === "transcript" && api.getMeetingDetailData) {
+        setDetail(await api.getMeetingDetailData(target.id));
+      }
+    } catch (caughtError) {
+      setError(formatError(caughtError));
+    }
+  }
+
+  async function renameMeetingRecord(target: MeetingMetadata, nextTitle: string) {
+    if (!api?.renameMeeting) {
+      throw new Error("当前运行环境无法重命名录音项目。");
+    }
+
+    const renamed = await api.renameMeeting(target.id, nextTitle);
+    if (meeting?.id === renamed.id) {
+      setMeeting(renamed);
+    }
+    setMeetings((current) => [
+      renamed,
+      ...current.filter((item) => item.id !== renamed.id)
+    ]);
+  }
+
+  async function renameActiveMeeting(nextTitle: string) {
+    if (!meeting) {
+      throw new Error("当前没有可重命名的会议。");
+    }
+    await renameMeetingRecord(meeting, nextTitle);
+  }
+
+  async function deleteMeetingRecord(target: MeetingMetadata) {
+    if (!api?.deleteMeeting) {
+      throw new Error("当前运行环境无法删除会议记录。");
+    }
+    await api.deleteMeeting(target.id);
+    setMeetings((current) => current.filter((item) => item.id !== target.id));
+    if (meeting?.id === target.id) {
+      setMeeting(null);
+      setDetail(null);
+    }
+  }
+
+  async function saveAppSettings(nextSettings: AppSettings): Promise<AppSettings> {
+    if (!api?.updateSettings) {
+      throw new Error("当前运行环境无法保存设置。");
+    }
+
+    const savedSettings = await api.updateSettings(nextSettings);
+    setSettings(savedSettings);
+    setOutputLanguage(savedSettings.defaultOutputLanguage);
+    return savedSettings;
+  }
+
+  function openTranscript(item: MeetingMetadata) {
+    if (!item.transcriptPath) {
+      return;
+    }
+    setError(null);
+    setMeeting(item);
+    setMeetingOrigin(null);
+    setDetail(null);
+    setView("transcript");
+  }
+
+  function returnHome() {
+    setError(null);
+    setMeeting(null);
+    setDetail(null);
+    setProcessingProgress(null);
+    setMeetingOrigin(null);
+    activeViewRef.current = "home";
+    setView("home");
+  }
+
+  function closeSettings() {
+    setError(null);
+    const destination = settingsReturnViewRef.current === "settings"
+      ? "home"
+      : settingsReturnViewRef.current;
+    activeViewRef.current = destination;
+    setView(destination);
+  }
+
+  function returnToPreviousPage() {
+    setError(null);
+    setDetail(null);
+    setProcessingProgress(null);
+    const previousView = meetingOrigin === "import" ? "import" : "home";
+    activeViewRef.current = previousView;
+    setView(previousView);
+  }
+
+  function returnToTranscript() {
+    setError(null);
+    setProcessingProgress(null);
+    activeViewRef.current = "transcript";
+    setView("transcript");
+  }
+
+  if (isLoading) {
+    return <LoadingScreen />;
   }
 
   return (
-    <div className="meetmap-root">
-      <MeetMapShell
-        crumbs={crumbs}
-        current={phase}
-        lang={settings.uiLanguage}
-        meetingCount={libraryMeetings.length}
-        onNav={(target) => navigate(target)}
-        onChooseWorkspace={() => void chooseWorkspaceFolder()}
-        onRevealWorkspace={() => void revealWorkspaceFolder()}
-        onSearchRequest={() => setIsSearchOpen(true)}
-        recording={recordingActive}
-        workspacePath={workspace?.currentPath ?? null}
-      >
-        {isWorkspaceLoading ? (
-          <section className="pane" aria-label="Loading workspace">
-            <div className="empty-state">Loading workspace...</div>
-          </section>
-        ) : null}
-        {!isWorkspaceLoading && phase === "workspace" ? (
-          <WorkspaceScreen
-            error={error}
-            isChoosing={isChoosingWorkspace}
-            onChooseFolder={() => void chooseWorkspaceFolder()}
-            onUseRecent={(folderPath) => void selectWorkspaceFolder(folderPath)}
-            workspace={workspace}
-          />
-        ) : null}
-        {!isWorkspaceLoading && phase === "library" ? (
-          <LibraryScreen
-            currentMeeting={meeting}
-            isImportingAudio={isImportingAudio}
-            lang={settings.uiLanguage}
-            meetings={libraryMeetings}
-            onImportAudio={() => void importAudio()}
-            onNew={() => navigate("pre")}
-            onOpenCurrent={() => meeting && navigate("detail")}
-            onOpenMeeting={openLibraryMeeting}
-            onRevealMeeting={(meetingId) => void revealMeetingFolder(meetingId)}
-            onReprocessMeeting={reprocessMeeting}
-            onExportMeeting={(meetingId, kind) => void openMeetingExport(meetingId, kind)}
-            onChooseWorkspace={() => void chooseWorkspaceFolder()}
-            onRevealWorkspace={() => void revealWorkspaceFolder()}
-            workspacePath={workspace?.currentPath ?? null}
-          />
-        ) : null}
-        {!isWorkspaceLoading && phase === "pre" ? (
-          <PreRecordingScreen
-            error={error}
-            isStarting={isStarting}
-            lang={settings.uiLanguage}
-            onCancel={() => navigate("library")}
-            onOutputLanguageChange={setDraftOutputLanguage}
-            onSummaryStyleChange={setDraftSummaryStyle}
-            onAudioSourcesChange={(sources) => {
-              resetPreflightState();
-              setDraftAudioSources(sources);
-            }}
-            onDeviceChange={(track, deviceId) => {
-              resetPreflightState();
-              setSelectedAudioDeviceIds((current) => ({ ...current, [track]: deviceId }));
-            }}
-            onOpenPrivacySettings={() => openSettings("privacy")}
-            onStart={() => void startRecording()}
-            onTitleChange={setDraftTitle}
-            audioSources={draftAudioSources}
-            devices={audioDevices}
-            selectedDeviceIds={selectedAudioDeviceIds}
-            audioPreflight={audioPreflight}
-            recognitionLanguageLabel={formatRecognitionLanguages(settings)}
-            outputLanguage={draftOutputLanguage}
-            summaryStyle={draftSummaryStyle}
-            transcriptionModelLabel={settingsRuntimeStatus?.openAi.configured ? settingsRuntimeStatus.openAi.transcriptionModel : "Provider not configured"}
-            title={draftTitle}
-          />
-        ) : null}
-        {!isWorkspaceLoading && phase === "recording" ? (
-          <RecordingScreen
-            error={error}
-            isStopping={isStopping}
-            isPaused={isRecordingPaused}
-            isPauseChanging={isPauseChanging}
-            audioSources={displayedAudioSources}
-            lang={settings.uiLanguage}
-            meeting={meeting}
-            onOpenAudioSettings={() => openSettings("audio")}
-            onPauseChange={(paused) => void setRecordingPaused(paused)}
-            recordingLevels={recordingLevels}
-            onTagMoment={(moment) => void saveTaggedMoment(moment)}
-            onStop={() => void stopRecording()}
-          />
-        ) : null}
-        {!isWorkspaceLoading && phase === "processing" ? (
-          <ProcessingScreen
-            activeStep={activeStep}
-            error={error}
-            lang={settings.uiLanguage}
-            progress={processingProgress}
-            canPreview={Boolean(meeting && canPreviewMeeting(meeting))}
-            onBack={() => navigate("library")}
-            onPreview={openProcessingPreview}
-            onRetry={() => {
-              if (meeting) {
-                setError(null);
-                void processCurrentMeeting(meeting.id);
-              }
-            }}
-          />
-        ) : null}
-        {!isWorkspaceLoading && phase === "detail" ? (
-          <DetailScreen
-            detailData={currentDetailData}
-            detailError={currentDetailError}
-            exportError={exportError}
-            exportDefaults={{
-              includeTimestamps: settings.includeTimestamps,
-              includeTranscriptAppendix: settings.includeTranscriptAppendix
-            }}
-            lang={settings.uiLanguage}
-            meeting={meeting}
-            onExport={(kind, options) => void openExport(kind, options)}
-            onDownloadAudio={() => void saveMeetingAudio()}
-            onRegenerate={regenerateCurrentMeeting}
-            onShare={shareCurrentMeeting}
-          />
-        ) : null}
-        {!isWorkspaceLoading && phase === "settings" ? (
-          <SettingsScreen
-            apiStatus={settingsRuntimeStatus}
-            audioDevices={audioDevices}
-            initialSection={settingsInitialSection}
-            key={settingsInitialSection}
-            onChange={(nextSettings) => void updateSettings(nextSettings)}
-            settings={settings}
-          />
-        ) : null}
-        {isSearchOpen ? (
-          <SearchOverlay
-            isSearching={visibleIsSearching}
-            onClose={() => setIsSearchOpen(false)}
-            onOpenMeeting={(meetingId) => {
-              setIsSearchOpen(false);
-              openLibraryMeeting(meetingId);
-            }}
-            onQueryChange={setSearchQuery}
-            query={searchQuery}
-            results={visibleSearchResults}
-          />
-        ) : null}
-      </MeetMapShell>
+    <main className="transcription-app">
+      {view === "home" ? (
+        <HomeScreen
+          apiReady={Boolean(runtimeStatus?.openAi.configured)}
+          error={error}
+          isChoosingWorkspace={isChoosingWorkspace}
+          meetings={meetings}
+          onChooseWorkspace={() => void chooseWorkspace()}
+          onImport={() => {
+            if (!workspace?.currentPath) {
+              setError("请先选择文件保存位置。");
+              return;
+            }
+            setError(null);
+            setView("import");
+          }}
+          onLive={openLiveSetup}
+          onDeleteMeeting={deleteMeetingRecord}
+          onOpenTranscript={openTranscript}
+          onRenameMeeting={renameMeetingRecord}
+          onRevealWorkspace={() => void revealWorkspace()}
+          workspacePath={workspace?.currentPath ?? null}
+        />
+      ) : null}
+
+      {view === "live-setup" ? (
+        <LiveSetupScreen
+          audioDevices={audioDevices}
+          audioSources={audioSources}
+          error={error}
+          isStarting={isStarting}
+          onBack={returnHome}
+          onHome={returnHome}
+          onDeviceChange={(track, deviceId) => {
+            setPreflightLevels({});
+            setUnavailableTracks({});
+            setSelectedDeviceIds((current) => ({ ...current, [track]: deviceId }));
+          }}
+          onLanguageChange={setOutputLanguage}
+          onSourceChange={(track, enabled) => {
+            setPreflightLevels({});
+            setUnavailableTracks({});
+            setAudioSources((current) => ({ ...current, [track]: enabled }));
+          }}
+          onStart={() => void startRecording()}
+          onTitleChange={setTitle}
+          outputLanguage={outputLanguage}
+          preflight={preflight}
+          selectedDeviceIds={selectedDeviceIds}
+          title={title}
+        />
+      ) : null}
+
+      {view === "recording" ? (
+        <RecordingView
+          audioSources={audioSources}
+          error={error}
+          isPauseChanging={isPauseChanging}
+          isPaused={isPaused}
+          isStopping={isStopping}
+          meeting={meeting}
+          onPause={() => void changePauseState()}
+          onBack={() => void leaveRecording("live-setup")}
+          onHome={() => void leaveRecording("home")}
+          onStop={() => void stopRecording()}
+          recordingLevels={recordingLevels}
+        />
+      ) : null}
+
+      {view === "import" ? (
+        <ImportScreen
+          error={error}
+          isImporting={isImporting}
+          onBack={returnHome}
+          onBrowse={() => void importWithPicker()}
+          onDrop={(file) => void importDroppedFile(file)}
+          onHome={returnHome}
+          onLanguageChange={setOutputLanguage}
+          onStart={() => meeting && void processMeeting(meeting)}
+          outputLanguage={outputLanguage}
+          selectedMeeting={meetingOrigin === "import" ? meeting : null}
+        />
+      ) : null}
+
+      {view === "processing" ? (
+        <ProcessingView
+          error={error}
+          meeting={meeting}
+          mode={processingMode}
+          onBack={processingMode === "analysis" ? returnToTranscript : returnToPreviousPage}
+          onHome={returnHome}
+          onRetry={() => meeting && void (processingMode === "analysis" ? analyzeMeeting(meeting) : processMeeting(meeting))}
+          progress={processingProgress}
+        />
+      ) : null}
+
+      {view === "settings" ? (
+        <SettingsView
+          onBack={closeSettings}
+          onHome={returnHome}
+          onSave={saveAppSettings}
+          settings={settings}
+        />
+      ) : null}
+
+      {view === "transcript" ? (
+        <TranscriptView
+          detail={detail}
+          error={error}
+          meeting={meeting}
+          onAnalyze={() => meeting && void analyzeMeeting(meeting)}
+          onBack={returnToPreviousPage}
+          onHome={returnHome}
+          onRename={renameActiveMeeting}
+          onReveal={() => meeting && void api?.revealMeetingFolder?.(meeting.id)}
+        />
+      ) : null}
+    </main>
+  );
+}
+
+function SettingsView({
+  onBack,
+  onHome,
+  onSave,
+  settings
+}: {
+  onBack(): void;
+  onHome(): void;
+  onSave(settings: AppSettings): Promise<AppSettings>;
+  settings: AppSettings;
+}) {
+  const [draft, setDraft] = useState(settings);
+  const [vocabularyText, setVocabularyText] = useState(settings.customVocabulary.join("\n"));
+  const [sourceSettings, setSourceSettings] = useState(settings);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveMessage, setSaveMessage] = useState<string | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
+
+  if (settings !== sourceSettings) {
+    setSourceSettings(settings);
+    setDraft(settings);
+    setVocabularyText(settings.customVocabulary.join("\n"));
+  }
+
+  async function submitSettings() {
+    const vocabulary = [...new Set(vocabularyText
+      .split(/\r?\n/)
+      .map((item) => item.trim())
+      .filter(Boolean))];
+
+    if (vocabulary.length > 100) {
+      setFormError("常用人名与术语最多可以保存 100 项。");
+      return;
+    }
+    if (vocabulary.some((item) => item.length > 80)) {
+      setFormError("每个人名或术语不能超过 80 个字符。");
+      return;
+    }
+
+    setIsSaving(true);
+    setFormError(null);
+    setSaveMessage(null);
+    try {
+      const saved = await onSave({
+        ...draft,
+        customVocabulary: vocabulary,
+        summaryInstructions: draft.summaryInstructions.trim()
+      });
+      setDraft(saved);
+      setVocabularyText(saved.customVocabulary.join("\n"));
+      setSaveMessage("设置已保存到本地。");
+    } catch (caughtError) {
+      setFormError(formatError(caughtError));
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  return (
+    <div className="app-frame settings-frame">
+      <MinimalHeader label="设置" onBack={onBack} onHome={onHome} />
+      <header className="settings-head">
+        <p className="eyebrow">EDIT / SETTINGS</p>
+        <h1>偏好与模型连接</h1>
+        <p>这些设置保存在本地。术语和总结偏好只会在你主动开始 LLM 分析时发送。</p>
+      </header>
+
+      <form className="settings-form" onSubmit={(event) => {
+        event.preventDefault();
+        void submitSettings();
+      }}>
+        <section className="settings-group">
+          <div className="settings-group-heading">
+            <span>01</span>
+            <div>
+              <h2>输出默认值</h2>
+              <p>新录音和新导入项目会优先使用这里的语言。</p>
+            </div>
+          </div>
+          <label className="settings-control">
+            <span>默认输出语言</span>
+            <LanguageSelect
+              onChange={(value) => setDraft((current) => ({ ...current, defaultOutputLanguage: value }))}
+              value={draft.defaultOutputLanguage}
+            />
+          </label>
+        </section>
+
+        <section className="settings-group">
+          <div className="settings-group-heading">
+            <span>02</span>
+            <div>
+              <h2>常用人名与术语</h2>
+              <p>每行一项，例如客户名、产品名、缩写或团队成员姓名。</p>
+            </div>
+          </div>
+          <label className="settings-control settings-control-wide">
+            <span>自定义词表</span>
+            <textarea
+              aria-label="自定义词表"
+              aria-describedby="vocabulary-help"
+              onChange={(event) => {
+                setVocabularyText(event.target.value);
+                setFormError(null);
+                setSaveMessage(null);
+              }}
+              placeholder={"MeetMap\nPowerApps\n张怡"}
+              rows={7}
+              value={vocabularyText}
+            />
+            <small id="vocabulary-help">最多 100 项；分析模型会优先保留这些名称的拼写。</small>
+          </label>
+        </section>
+
+        <section className="settings-group">
+          <div className="settings-group-heading">
+            <span>03</span>
+            <div>
+              <h2>总结偏好</h2>
+              <p>描述你希望总结重点关注的内容，不需要编写完整提示词。</p>
+            </div>
+          </div>
+          <label className="settings-control settings-control-wide">
+            <span>自定义要求</span>
+            <textarea
+              aria-label="自定义要求"
+              maxLength={1000}
+              onChange={(event) => {
+                setDraft((current) => ({ ...current, summaryInstructions: event.target.value }));
+                setFormError(null);
+                setSaveMessage(null);
+              }}
+              placeholder="例如：优先列出客户反馈、最终决定和有明确负责人的行动项。"
+              rows={5}
+              value={draft.summaryInstructions}
+            />
+            <small>{draft.summaryInstructions.length}/1000</small>
+          </label>
+        </section>
+
+        <LlmProviderSettings />
+
+        <section className="settings-group settings-group-compact">
+          <div className="settings-group-heading">
+            <span>05</span>
+            <div>
+              <h2>常用行为</h2>
+              <p>控制原文、导出与应用启动方式。</p>
+            </div>
+          </div>
+          <div className="settings-checks">
+            <label>
+              <input
+                checked={draft.preserveTranscriptLanguage}
+                onChange={(event) => setDraft((current) => ({ ...current, preserveTranscriptLanguage: event.target.checked }))}
+                type="checkbox"
+              />
+              <span>保留文字稿原始语言</span>
+            </label>
+            <label>
+              <input
+                checked={draft.includeTimestamps}
+                onChange={(event) => setDraft((current) => ({ ...current, includeTimestamps: event.target.checked }))}
+                type="checkbox"
+              />
+              <span>导出内容包含时间信息</span>
+            </label>
+            <label>
+              <input
+                checked={draft.openAtStartup}
+                onChange={(event) => setDraft((current) => ({ ...current, openAtStartup: event.target.checked }))}
+                type="checkbox"
+              />
+              <span>Windows 启动时打开 MeetMap</span>
+            </label>
+          </div>
+        </section>
+
+        <footer className="settings-footer">
+          <div aria-live="polite">
+            {formError ? <span className="settings-error">{formError}</span> : null}
+            {!formError && saveMessage ? <span className="settings-saved">{saveMessage}</span> : null}
+          </div>
+          <button className="settings-save" disabled={isSaving} type="submit">
+            {isSaving ? "正在保存" : "保存设置"}
+          </button>
+        </footer>
+      </form>
     </div>
   );
 }
 
-function SearchOverlay({
-  isSearching,
-  onClose,
-  onOpenMeeting,
-  onQueryChange,
-  query,
-  results
+const EMPTY_PROVIDER_DRAFT: SaveLlmProviderInput = {
+  name: "",
+  baseUrl: "https://api.openai.com/v1",
+  model: "gpt-4.1-mini",
+  apiStyle: "responses",
+  apiKeyRequired: true,
+  apiKey: ""
+};
+
+function LlmProviderSettings() {
+  const api = window.meetMap;
+  const [state, setState] = useState<LlmProviderState>({
+    activeProviderId: null,
+    providers: []
+  });
+  const [draft, setDraft] = useState<SaveLlmProviderInput>(EMPTY_PROVIDER_DRAFT);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [providerError, setProviderError] = useState<string | null>(null);
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void api?.getLlmProviders?.().then((nextState) => {
+      if (!cancelled) {
+        setState(nextState);
+      }
+    }).catch((caughtError) => {
+      if (!cancelled) {
+        setProviderError(formatError(caughtError));
+      }
+    }).finally(() => {
+      if (!cancelled) {
+        setIsLoading(false);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [api]);
+
+  function startEdit(providerId: string) {
+    const provider = state.providers.find((item) => item.id === providerId);
+    if (!provider) {
+      return;
+    }
+    setDraft({
+      id: provider.id,
+      name: provider.name,
+      baseUrl: provider.baseUrl,
+      model: provider.model,
+      apiStyle: provider.apiStyle,
+      apiKeyRequired: provider.apiKeyRequired,
+      apiKey: ""
+    });
+    setMessage(null);
+    setProviderError(null);
+  }
+
+  function applyPreset(preset: "openai" | "ollama" | "lmstudio") {
+    const values: Record<typeof preset, SaveLlmProviderInput> = {
+      openai: EMPTY_PROVIDER_DRAFT,
+      ollama: {
+        name: "Ollama（本地）",
+        baseUrl: "http://localhost:11434/v1",
+        model: "qwen3:8b",
+        apiStyle: "chat_completions",
+        apiKeyRequired: false,
+        apiKey: ""
+      },
+      lmstudio: {
+        name: "LM Studio（本地）",
+        baseUrl: "http://localhost:1234/v1",
+        model: "local-model",
+        apiStyle: "chat_completions",
+        apiKeyRequired: false,
+        apiKey: ""
+      }
+    };
+    setDraft({ ...values[preset] });
+    setMessage(null);
+    setProviderError(null);
+  }
+
+  async function saveProvider() {
+    if (!api?.saveLlmProvider) {
+      setProviderError("当前运行环境无法保存 LLM 配置。");
+      return;
+    }
+    setIsSaving(true);
+    setMessage(null);
+    setProviderError(null);
+    try {
+      const nextState = await api.saveLlmProvider(draft);
+      setState(nextState);
+      setDraft(EMPTY_PROVIDER_DRAFT);
+      setMessage("LLM 提供商已保存；密钥不会显示在界面中。");
+    } catch (caughtError) {
+      setProviderError(formatError(caughtError));
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function activateProvider(providerId: string) {
+    if (!api?.setActiveLlmProvider) {
+      return;
+    }
+    try {
+      setState(await api.setActiveLlmProvider(providerId));
+      setMessage("已切换会议分析模型，下一次分析立即生效。");
+      setProviderError(null);
+    } catch (caughtError) {
+      setProviderError(formatError(caughtError));
+    }
+  }
+
+  async function deleteProvider(providerId: string) {
+    if (pendingDeleteId !== providerId) {
+      setPendingDeleteId(providerId);
+      return;
+    }
+    if (!api?.deleteLlmProvider) {
+      return;
+    }
+    try {
+      setState(await api.deleteLlmProvider(providerId));
+      if (draft.id === providerId) {
+        setDraft(EMPTY_PROVIDER_DRAFT);
+      }
+      setPendingDeleteId(null);
+      setMessage("提供商配置和加密密钥已删除。");
+      setProviderError(null);
+    } catch (caughtError) {
+      setProviderError(formatError(caughtError));
+    }
+  }
+
+  return (
+    <section className="settings-group llm-settings-group">
+      <div className="settings-group-heading">
+        <span>04</span>
+        <div>
+          <h2>LLM 提供商</h2>
+          <p>可保存多个 OpenAI-compatible API，包含 OpenAI、Ollama、LM Studio 和其他兼容服务。</p>
+        </div>
+      </div>
+
+      <div className="llm-provider-layout">
+        <div className="llm-provider-list" aria-label="已保存的 LLM 提供商">
+          <div className="llm-provider-list-head">
+            <strong>已保存</strong>
+            <button onClick={() => setDraft(EMPTY_PROVIDER_DRAFT)} type="button">新增</button>
+          </div>
+          {isLoading ? <p className="llm-empty">正在读取本地配置…</p> : null}
+          {!isLoading && state.providers.length === 0 ? (
+            <p className="llm-empty">尚未配置。可以从右侧预设开始。</p>
+          ) : null}
+          {state.providers.map((provider) => (
+            <article className={provider.id === state.activeProviderId ? "is-active" : ""} key={provider.id}>
+              <button className="llm-provider-main" onClick={() => startEdit(provider.id)} type="button">
+                <span>{provider.name}</span>
+                <small>{provider.model}</small>
+              </button>
+              <div className="llm-provider-actions">
+                {provider.id === state.activeProviderId ? (
+                  <span className="llm-active-badge">使用中</span>
+                ) : (
+                  <button onClick={() => void activateProvider(provider.id)} type="button">启用</button>
+                )}
+                <button className={pendingDeleteId === provider.id ? "danger-confirm" : ""} onClick={() => void deleteProvider(provider.id)} type="button">
+                  {pendingDeleteId === provider.id ? "确认删除" : "删除"}
+                </button>
+              </div>
+            </article>
+          ))}
+        </div>
+
+        <div className="llm-provider-editor">
+          <div className="llm-presets" aria-label="LLM 配置预设">
+            <button onClick={() => applyPreset("openai")} type="button">OpenAI</button>
+            <button onClick={() => applyPreset("ollama")} type="button">Ollama</button>
+            <button onClick={() => applyPreset("lmstudio")} type="button">LM Studio</button>
+          </div>
+          <div className="llm-field-grid">
+            <label><span>名称</span><input onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} placeholder="例如：公司 Azure OpenAI" value={draft.name} /></label>
+            <label><span>模型</span><input onChange={(event) => setDraft((current) => ({ ...current, model: event.target.value }))} placeholder="模型 ID" value={draft.model} /></label>
+            <label className="llm-wide"><span>API Base URL</span><input onChange={(event) => setDraft((current) => ({ ...current, baseUrl: event.target.value }))} placeholder="https://api.example.com/v1" value={draft.baseUrl} /></label>
+            <label><span>API 类型</span><select onChange={(event) => setDraft((current) => ({ ...current, apiStyle: event.target.value as SaveLlmProviderInput["apiStyle"] }))} value={draft.apiStyle}><option value="responses">Responses API</option><option value="chat_completions">Chat Completions</option></select></label>
+            <label><span>API Key</span><input autoComplete="new-password" onChange={(event) => setDraft((current) => ({ ...current, apiKey: event.target.value }))} placeholder={draft.id ? "留空则保留原密钥" : "sk-…"} type="password" value={draft.apiKey ?? ""} /></label>
+          </div>
+          <label className="llm-no-key"><input checked={!draft.apiKeyRequired} onChange={(event) => setDraft((current) => ({ ...current, apiKeyRequired: !event.target.checked }))} type="checkbox" /><span>本地服务，不需要 API Key</span></label>
+          <div className="llm-editor-footer">
+            <div aria-live="polite">{providerError ? <span className="settings-error">{providerError}</span> : message ? <span className="settings-saved">{message}</span> : <small>API Key 使用系统安全存储加密，渲染界面不会读取明文。</small>}</div>
+            <button className="solid-small" disabled={isSaving} onClick={() => void saveProvider()} type="button">{isSaving ? "保存中…" : draft.id ? "更新提供商" : "保存提供商"}</button>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function HomeScreen({
+  apiReady,
+  error,
+  isChoosingWorkspace,
+  meetings,
+  onChooseWorkspace,
+  onImport,
+  onLive,
+  onDeleteMeeting,
+  onOpenTranscript,
+  onRenameMeeting,
+  onRevealWorkspace,
+  workspacePath
 }: {
-  isSearching: boolean;
-  onClose(): void;
-  onOpenMeeting(meetingId: string): void;
-  onQueryChange(query: string): void;
-  query: string;
-  results: MeetingSearchResult[];
+  apiReady: boolean;
+  error: string | null;
+  isChoosingWorkspace: boolean;
+  meetings: MeetingMetadata[];
+  onChooseWorkspace(): void;
+  onImport(): void;
+  onLive(): void;
+  onDeleteMeeting(meeting: MeetingMetadata): Promise<void>;
+  onOpenTranscript(meeting: MeetingMetadata): void;
+  onRenameMeeting(meeting: MeetingMetadata, title: string): Promise<void>;
+  onRevealWorkspace(): void;
+  workspacePath: string | null;
+}) {
+  const [libraryQuery, setLibraryQuery] = useState("");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [titleDraft, setTitleDraft] = useState("");
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  const [libraryError, setLibraryError] = useState<string | null>(null);
+  const normalizedQuery = libraryQuery.trim().toLocaleLowerCase();
+  const visibleMeetings = meetings.filter((item) =>
+    !normalizedQuery || item.title.toLocaleLowerCase().includes(normalizedQuery)
+  );
+
+  async function saveMeetingTitle(item: MeetingMetadata) {
+    const nextTitle = titleDraft.trim();
+    if (!nextTitle) {
+      setLibraryError("会议名称不能为空。");
+      return;
+    }
+    try {
+      await onRenameMeeting(item, nextTitle);
+      setEditingId(null);
+      setLibraryError(null);
+    } catch (caughtError) {
+      setLibraryError(formatError(caughtError));
+    }
+  }
+
+  async function requestDelete(item: MeetingMetadata) {
+    if (pendingDeleteId !== item.id) {
+      setPendingDeleteId(item.id);
+      setLibraryError(null);
+      return;
+    }
+    try {
+      await onDeleteMeeting(item);
+      setPendingDeleteId(null);
+      setLibraryError(null);
+    } catch (caughtError) {
+      setLibraryError(formatError(caughtError));
+    }
+  }
+
+  return (
+    <div className="app-frame home-frame">
+      <header className="home-header">
+        <div className="wordmark">MeetMap</div>
+        <div className={`provider-state ${apiReady ? "ready" : ""}`}>
+          <span className="state-dot" />
+          {apiReady ? "转写服务已连接" : "转写服务未配置"}
+        </div>
+      </header>
+
+      <section className="home-intro">
+        <p className="eyebrow">VOICE TO TEXT / 语音转文字</p>
+        <h1>把会议声音，<br />变成可以使用的文字。</h1>
+        <p>录制正在进行的会议，或导入已有音频。所有原始文件和文字稿都保存在你选择的本地文件夹。</p>
+      </section>
+
+      <WorkspaceBar
+        isChoosing={isChoosingWorkspace}
+        onChoose={onChooseWorkspace}
+        onReveal={onRevealWorkspace}
+        path={workspacePath}
+      />
+
+      {error ? <InlineError message={error} /> : null}
+
+      <section className="module-grid" aria-label="可用模块">
+        <button className="module-card live-card" disabled={!workspacePath} onClick={onLive} type="button">
+          <div className="module-index">01</div>
+          <div className="live-visual" aria-hidden="true">
+            <span className="record-core" />
+            <span className="record-ring ring-one" />
+            <span className="record-ring ring-two" />
+          </div>
+          <div className="module-copy">
+            <p className="module-kicker">LIVE MEETING</p>
+            <h2>即时会议</h2>
+            <p>录制系统声音与麦克风，会议结束后自动生成完整文字稿。</p>
+            <span className="module-action">设置并开始录制</span>
+          </div>
+        </button>
+
+        <button className="module-card import-card" disabled={!workspacePath} onClick={onImport} type="button">
+          <div className="module-index">02</div>
+          <ImportLines />
+          <div className="module-copy">
+            <p className="module-kicker">AUDIO IMPORT</p>
+            <h2>导入音频</h2>
+            <p>拖入 WAV 或 M4A 文件，保留原始语言并生成带时间位置的文字稿。</p>
+            <span className="module-action">选择本地音频</span>
+          </div>
+        </button>
+      </section>
+
+      <section className="recent-section meeting-library">
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">MEETING LIBRARY</p>
+            <h2>会议记录</h2>
+          </div>
+          <span>{meetings.length > 0 ? `${meetings.length} 个本地项目` : "尚无记录"}</span>
+        </div>
+        {meetings.length > 0 ? (
+          <>
+          <label className="meeting-library-search">
+            <span>搜索会议</span>
+            <input onChange={(event) => setLibraryQuery(event.target.value)} placeholder="按会议名称查找" type="search" value={libraryQuery} />
+          </label>
+          {libraryError ? <InlineError message={libraryError} /> : null}
+          <div className="recent-list">
+            {visibleMeetings.map((item) => (
+              <article className="meeting-library-row" key={item.id}>
+                <div className="meeting-library-main">
+                  {editingId === item.id ? (
+                    <input autoFocus onChange={(event) => setTitleDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { void saveMeetingTitle(item); } if (event.key === "Escape") { setEditingId(null); } }} value={titleDraft} />
+                  ) : (
+                    <button disabled={!item.transcriptPath} onClick={() => onOpenTranscript(item)} type="button">
+                      <span className="recent-title">{item.title}</span>
+                      <span>{formatDate(item.timestamps.updatedAt)} · {formatTrackSummary(item)}</span>
+                    </button>
+                  )}
+                </div>
+                <span className={`meeting-status status-${item.status}`}>{formatMeetingStatus(item.status)}</span>
+                <div className="meeting-library-actions">
+                  {editingId === item.id ? (
+                    <>
+                      <button onClick={() => void saveMeetingTitle(item)} type="button">保存</button>
+                      <button onClick={() => setEditingId(null)} type="button">取消</button>
+                    </>
+                  ) : (
+                    <button onClick={() => { setEditingId(item.id); setTitleDraft(item.title); setPendingDeleteId(null); }} type="button">重命名</button>
+                  )}
+                  <button className={pendingDeleteId === item.id ? "danger-confirm" : ""} onClick={() => void requestDelete(item)} type="button">
+                    {pendingDeleteId === item.id ? "确认移到回收站" : "删除"}
+                  </button>
+                </div>
+              </article>
+            ))}
+            {visibleMeetings.length === 0 ? <div className="empty-line">没有找到匹配的会议。</div> : null}
+          </div>
+          </>
+        ) : (
+          <div className="empty-line">开始一次录制或导入后，会议项目会显示在这里。</div>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function WorkspaceBar({
+  isChoosing,
+  onChoose,
+  onReveal,
+  path
+}: {
+  isChoosing: boolean;
+  onChoose(): void;
+  onReveal(): void;
+  path: string | null;
 }) {
   return (
-    <div className="dialog-backdrop search-backdrop" onClick={onClose}>
-      <div
-        aria-label="Search meetings"
-        aria-modal="true"
-        className="search-dialog"
-        onClick={(event) => event.stopPropagation()}
-        role="dialog"
-      >
-        <input
-          autoFocus
-          className="input search-dialog-input"
-          onChange={(event) => onQueryChange(event.target.value)}
-          placeholder="Search meetings, transcripts, action items..."
-          type="search"
-          value={query}
-        />
-        <div className="search-results">
-          {query.trim().length < 2 ? (
-            <div className="empty-state compact">Type at least 2 characters</div>
-          ) : isSearching ? (
-            <div className="empty-state compact">Searching...</div>
-          ) : results.length === 0 ? (
-            <div className="empty-state compact">No results</div>
-          ) : (
-            results.map((result) => (
-              <button className="search-result" key={result.meetingId} onClick={() => onOpenMeeting(result.meetingId)} type="button">
-                <strong>{result.title}</strong>
-                <span className="sub">{result.status} - {new Date(result.updatedAt).toLocaleString()}</span>
-                {result.matches.map((match, index) => (
-                  <span className="search-match" key={`${match.kind}-${index}`}>
-                    <span className="chip">{match.kind}</span>
-                    <span>{match.snippet}</span>
-                  </span>
-                ))}
-              </button>
-            ))
-          )}
-        </div>
+    <section className={`workspace-bar ${path ? "selected" : ""}`}>
+      <div className="workspace-marker" aria-hidden="true" />
+      <div className="workspace-copy">
+        <span>文件保存位置</span>
+        <strong>{path ?? "尚未选择本地文件夹"}</strong>
+      </div>
+      <div className="workspace-actions">
+        {path ? <button onClick={onReveal} type="button">打开文件夹</button> : null}
+        <button className="solid-small" disabled={isChoosing} onClick={onChoose} type="button">
+          {isChoosing ? "正在选择..." : path ? "更改位置" : "选择位置"}
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function LiveSetupScreen({
+  audioDevices,
+  audioSources,
+  error,
+  isStarting,
+  onBack,
+  onDeviceChange,
+  onHome,
+  onLanguageChange,
+  onSourceChange,
+  onStart,
+  onTitleChange,
+  outputLanguage,
+  preflight,
+  selectedDeviceIds,
+  title
+}: {
+  audioDevices: RecordingAudioDevice[];
+  audioSources: RecordingAudioSources;
+  error: string | null;
+  isStarting: boolean;
+  onBack(): void;
+  onDeviceChange(track: AudioTrack, deviceId: string): void;
+  onHome(): void;
+  onLanguageChange(language: LanguageOptionValue): void;
+  onSourceChange(track: AudioTrack, enabled: boolean): void;
+  onStart(): void;
+  onTitleChange(title: string): void;
+  outputLanguage: LanguageOptionValue;
+  preflight: ReturnType<typeof createAudioPreflightState>;
+  selectedDeviceIds: Partial<Record<AudioTrack, string>>;
+  title: string;
+}) {
+  return (
+    <div className="app-frame inner-frame">
+      <MinimalHeader label="即时会议" onBack={onBack} onHome={onHome} />
+      <div className="setup-layout">
+        <section className="setup-main">
+          <p className="eyebrow">RECORD A MEETING</p>
+          <h1>先确认声音，<br />然后开始录制。</h1>
+          <Field label="会议名称">
+            <input onChange={(event) => onTitleChange(event.target.value)} value={title} />
+          </Field>
+          <Field label="文字稿语言">
+            <LanguageSelect onChange={onLanguageChange} value={outputLanguage} />
+          </Field>
+          {error ? <InlineError message={error} /> : null}
+          <button
+            className="primary-action"
+            disabled={isStarting || !preflight.canStart}
+            onClick={onStart}
+            type="button"
+          >
+            <span className="button-record-dot" />
+            {isStarting ? "正在启动录音..." : "开始录制"}
+          </button>
+          {preflight.blockingReason ? <p className="field-error">{preflight.blockingReason}</p> : null}
+        </section>
+
+        <section className="audio-panel" aria-label="音频设置">
+          <div className="panel-title">
+            <div>
+              <p className="eyebrow">AUDIO INPUT</p>
+              <h2>音频设置</h2>
+            </div>
+            <span className="checking-label">实时检测</span>
+          </div>
+          <AudioSourceRow
+            devices={audioDevices.filter((device) => device.track === "system")}
+            enabled={audioSources.system}
+            level={preflight.tracks.system.level}
+            label="系统声音"
+            message={preflight.tracks.system.message}
+            onDeviceChange={(id) => onDeviceChange("system", id)}
+            onToggle={(enabled) => onSourceChange("system", enabled)}
+            selectedDeviceId={selectedDeviceIds.system}
+          />
+          <AudioSourceRow
+            devices={audioDevices.filter((device) => device.track === "microphone")}
+            enabled={audioSources.microphone}
+            level={preflight.tracks.microphone.level}
+            label="麦克风"
+            message={preflight.tracks.microphone.message}
+            onDeviceChange={(id) => onDeviceChange("microphone", id)}
+            onToggle={(enabled) => onSourceChange("microphone", enabled)}
+            selectedDeviceId={selectedDeviceIds.microphone}
+          />
+          <p className="privacy-note">录制停止后才会上传有效音频进行转写。本地原始录音会保留在工作区。</p>
+        </section>
       </div>
     </div>
   );
 }
 
-function createInitialProcessingProgress(meetingId: string): ProcessingProgressUpdate {
-  return {
-    meetingId,
-    step: "activity_detection",
-    currentStep: 1,
-    totalSteps: 6,
-    percent: 0,
-    updatedAt: new Date().toISOString()
-  };
-}
-
-function createCompletedProcessingProgress(meetingId: string): ProcessingProgressUpdate {
-  return {
-    meetingId,
-    step: "completed",
-    currentStep: 6,
-    totalSteps: 6,
-    percent: 100,
-    updatedAt: new Date().toISOString()
-  };
-}
-
-function canPreviewMeeting(meeting: MeetingMetadata): boolean {
-  return Boolean(
-    meeting.transcriptPath ||
-    meeting.structurePath ||
-    meeting.exportPaths.htmlMeetingMapPath ||
-    meeting.status === "completed" ||
-    meeting.status === "no_audio"
+function AudioSourceRow({
+  devices,
+  enabled,
+  label,
+  level,
+  message,
+  onDeviceChange,
+  onToggle,
+  selectedDeviceId
+}: {
+  devices: RecordingAudioDevice[];
+  enabled: boolean;
+  label: string;
+  level: number;
+  message: string;
+  onDeviceChange(deviceId: string): void;
+  onToggle(enabled: boolean): void;
+  selectedDeviceId?: string;
+}) {
+  return (
+    <div className={`audio-source ${enabled ? "enabled" : ""}`}>
+      <div className="audio-source-head">
+        <div>
+          <strong>{label}</strong>
+          <span>{enabled ? message : "已关闭"}</span>
+        </div>
+        <button
+          aria-checked={enabled}
+          aria-label={`${label}开关`}
+          className="minimal-toggle"
+          onClick={() => onToggle(!enabled)}
+          role="switch"
+          type="button"
+        >
+          <span />
+        </button>
+      </div>
+      <select
+        aria-label={`${label}设备`}
+        disabled={!enabled}
+        onChange={(event) => onDeviceChange(event.target.value)}
+        value={selectedDeviceId ?? ""}
+      >
+        {devices.length === 0 ? <option value="">默认设备</option> : null}
+        {devices.map((device) => <option key={device.id} value={device.id}>{device.label}</option>)}
+      </select>
+      <LevelMeter active={enabled} level={level} />
+    </div>
   );
 }
 
-async function copyTextToClipboard(value: string): Promise<void> {
-  if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(value);
-    return;
+function RecordingView({
+  audioSources,
+  error,
+  isPauseChanging,
+  isPaused,
+  isStopping,
+  meeting,
+  onBack,
+  onHome,
+  onPause,
+  onStop,
+  recordingLevels
+}: {
+  audioSources: RecordingAudioSources;
+  error: string | null;
+  isPauseChanging: boolean;
+  isPaused: boolean;
+  isStopping: boolean;
+  meeting: MeetingMetadata | null;
+  onBack(): void;
+  onHome(): void;
+  onPause(): void;
+  onStop(): void;
+  recordingLevels: Partial<Record<AudioTrack, RecordingAudioLevel[]>>;
+}) {
+  const elapsed = useRecordingTimer(meeting, isPaused);
+
+  return (
+    <div className="recording-view">
+      <div className="recording-topline">
+        <PageNavigation onBack={onBack} onHome={onHome} />
+        <div className="recording-state"><span />{isPaused ? "录制已暂停" : "正在录制"}</div>
+      </div>
+      <section className="recording-stage">
+        <p className="recording-title">{meeting?.title ?? "即时会议"}</p>
+        <div className="recording-time">{formatElapsed(elapsed)}</div>
+        <p className="recording-save-note">音频正在保存到本地工作区</p>
+        <LiveWaveform
+          microphone={audioSources.microphone ? recordingLevels.microphone ?? [] : []}
+          paused={isPaused}
+          system={audioSources.system ? recordingLevels.system ?? [] : []}
+        />
+        {error ? <InlineError message={error} /> : null}
+        <div className="recording-controls">
+          <button disabled={isPauseChanging || isStopping} onClick={onPause} type="button">
+            {isPauseChanging ? "处理中..." : isPaused ? "继续录制" : "暂停"}
+          </button>
+          <button className="stop-action" disabled={isStopping} onClick={onStop} type="button">
+            <span />
+            {isStopping ? "正在停止..." : "结束并转写"}
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function ImportScreen({
+  error,
+  isImporting,
+  onBack,
+  onBrowse,
+  onDrop,
+  onHome,
+  onLanguageChange,
+  onStart,
+  outputLanguage,
+  selectedMeeting
+}: {
+  error: string | null;
+  isImporting: boolean;
+  onBack(): void;
+  onBrowse(): void;
+  onDrop(file: File): void;
+  onHome(): void;
+  onLanguageChange(language: LanguageOptionValue): void;
+  onStart(): void;
+  outputLanguage: LanguageOptionValue;
+  selectedMeeting: MeetingMetadata | null;
+}) {
+  const [dragging, setDragging] = useState(false);
+  const selectedTrack = selectedMeeting?.audioTracks.system;
+
+  return (
+    <div className="app-frame inner-frame">
+      <MinimalHeader label="导入音频" onBack={onBack} onHome={onHome} />
+      <section className="import-layout">
+        <div className="import-copy">
+          <p className="eyebrow">AUDIO TO TRANSCRIPT</p>
+          <h1>把已有录音，<br />整理成文字。</h1>
+          <p>支持 WAV 和 M4A。选择文件后先完成格式与可读性检查，由你确认并点击 Start 才会开始转写。</p>
+          <Field label="文字稿语言">
+            <LanguageSelect disabled={Boolean(selectedMeeting)} onChange={onLanguageChange} value={outputLanguage} />
+          </Field>
+          {error ? <InlineError message={error} /> : null}
+        </div>
+
+        <div
+          className={`drop-zone ${dragging ? "dragging" : ""} ${selectedMeeting ? "file-ready" : ""}`}
+          onDragEnter={(event) => {
+            event.preventDefault();
+            setDragging(true);
+          }}
+          onDragLeave={(event) => {
+            event.preventDefault();
+            if (event.currentTarget === event.target) {
+              setDragging(false);
+            }
+          }}
+          onDragOver={(event) => event.preventDefault()}
+          onDrop={(event) => {
+            event.preventDefault();
+            setDragging(false);
+            const file = event.dataTransfer.files[0];
+            if (file) {
+              onDrop(file);
+            }
+          }}
+        >
+          {selectedMeeting && selectedTrack ? (
+            <>
+              <div className="file-ready-mark" aria-hidden="true"><span /></div>
+              <p className="ready-kicker">AUDIO READY</p>
+              <p className="drop-title">音频文件检查通过</p>
+              <p className="ready-file-name">{selectedMeeting.title}</p>
+              <dl className="ready-file-meta">
+                <div><dt>格式</dt><dd>{selectedTrack.format.toUpperCase()}</dd></div>
+                <div><dt>时长</dt><dd>{formatAudioDuration(selectedTrack.durationMs)}</dd></div>
+                <div><dt>文件大小</dt><dd>{formatByteLength(selectedTrack.byteLength)}</dd></div>
+              </dl>
+              <button className="primary-action start-transcription" onClick={onStart} type="button">
+                Start 转写
+              </button>
+              <button className="replace-file-action" disabled={isImporting} onClick={onBrowse} type="button">
+                {isImporting ? "正在检查..." : "更换音频文件"}
+              </button>
+              <p className="drop-privacy">点击 Start 后才会开始语音识别；完成后由你决定是否调用 AI 分析。</p>
+            </>
+          ) : (
+            <>
+              <div className="drop-mark" aria-hidden="true"><span /></div>
+              <p className="drop-title">将音频拖到这里</p>
+              <p className="drop-help">WAV 或 M4A · 单个文件</p>
+              <button className="primary-action compact" disabled={isImporting} onClick={onBrowse} type="button">
+                {isImporting ? "正在检查音频..." : "选择音频文件"}
+              </button>
+              <p className="drop-privacy">导入操作不会移动或删除原始文件，也不会自动开始转写。</p>
+            </>
+          )}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function ProcessingView({
+  error,
+  meeting,
+  mode,
+  onBack,
+  onHome,
+  onRetry,
+  progress
+}: {
+  error: string | null;
+  meeting: MeetingMetadata | null;
+  mode: ProcessingMode;
+  onBack(): void;
+  onHome(): void;
+  onRetry(): void;
+  progress: ProcessingProgressUpdate | null;
+}) {
+  const stage = visibleProcessingStage(progress?.step, mode);
+  const percent = visibleProgress(progress, mode);
+  const steps = mode === "analysis"
+    ? [["读取文字稿", 18], ["AI 分析", 72], ["保存分析", 100]]
+    : [["检测声音", 12], ["生成文字", 72], ["保存文字稿", 100]];
+
+  return (
+    <div className="processing-view">
+      <div className="processing-navigation"><PageNavigation onBack={onBack} onHome={onHome} /></div>
+      <div className="processing-content">
+        <p className="eyebrow">{mode === "analysis" ? "AI ANALYSIS" : "TRANSCRIBING"}</p>
+        <h1>{error ? "处理暂时中断。" : processingHeading(progress?.step, mode)}</h1>
+        <p className="processing-file">{meeting?.title ?? "音频文件"}</p>
+        <div className="processing-meter"><span style={{ transform: `scaleX(${percent / 100})` }} /></div>
+        <div className="processing-status">
+          <span>{error ? "需要处理" : stage}</span>
+          <strong>{error ? "—" : `${percent}%`}</strong>
+        </div>
+        <div className="processing-steps" aria-label="转写步骤">
+          {steps.map(([label, threshold]) => (
+            <span className={percent >= Number(threshold) ? "done" : ""} key={String(label)}>{label}</span>
+          ))}
+        </div>
+        {error ? (
+          <div className="processing-error">
+            <p>{error}</p>
+            <div>
+              <button onClick={onBack} type="button">返回首页</button>
+              <button className="solid-small" onClick={onRetry} type="button">重新转写</button>
+            </div>
+          </div>
+        ) : (
+          <p className="processing-note">
+            {mode === "analysis"
+              ? "本次只读取已保存的文字稿并发送给当前启用的模型，不会重新识别或上传原始音频。"
+              : "本次只生成并保存文字稿。完成后由你决定是否开始 AI 分析。"}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function TranscriptView({
+  detail,
+  error,
+  meeting,
+  onAnalyze,
+  onBack,
+  onHome,
+  onRename,
+  onReveal
+}: {
+  detail: MeetingDetailData | null;
+  error: string | null;
+  meeting: MeetingMetadata | null;
+  onAnalyze(): void;
+  onBack(): void;
+  onHome(): void;
+  onRename(title: string): Promise<void>;
+  onReveal(): void;
+}) {
+  const [query, setQuery] = useState("");
+  const [copied, setCopied] = useState(false);
+  const [analysisLanguage, setAnalysisLanguage] = useState<"zh" | "en">("zh");
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [isSavingTitle, setIsSavingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState(meeting?.title ?? "");
+  const [titleError, setTitleError] = useState<string | null>(null);
+  const segments = detail?.transcript?.segments ?? [];
+  const visibleSegments = segments.filter((segment) => segment.text.toLowerCase().includes(query.trim().toLowerCase()));
+  const fullText = segments.map((segment) => `[${formatTimestamp(segment.startTimeMs)}] ${segment.speakerLabel ?? trackLabel(segment.trackId)}\n${segment.text}`).join("\n\n");
+  const audioTrack = detail?.audio?.tracks[0];
+  const analysis = detail?.structure;
+
+  async function copyTranscript() {
+    try {
+      await navigator.clipboard.writeText(fullText);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1800);
+    } catch {
+      setCopied(false);
+    }
   }
 
-  window.localStorage.setItem("meetmap:last-share", value);
+  async function saveTitle() {
+    const nextTitle = titleDraft.trim();
+    if (!nextTitle) {
+      setTitleError("项目名称不能为空。");
+      return;
+    }
+    if (nextTitle.length > 120) {
+      setTitleError("项目名称不能超过 120 个字符。");
+      return;
+    }
+    if (nextTitle === meeting?.title) {
+      setIsEditingTitle(false);
+      setTitleError(null);
+      return;
+    }
+
+    setIsSavingTitle(true);
+    setTitleError(null);
+    try {
+      await onRename(nextTitle);
+      setIsEditingTitle(false);
+    } catch (caughtError) {
+      setTitleError(formatError(caughtError));
+    } finally {
+      setIsSavingTitle(false);
+    }
+  }
+
+  function cancelTitleEdit() {
+    setTitleDraft(meeting?.title ?? "");
+    setTitleError(null);
+    setIsEditingTitle(false);
+  }
+
+  return (
+    <div className="app-frame transcript-frame">
+      <MinimalHeader label="文字稿与分析" onBack={onBack} onHome={onHome} />
+      <header className="transcript-head">
+        <div>
+          <p className="eyebrow">TRANSCRIPT</p>
+          {isEditingTitle ? (
+            <form className="transcript-title-editor" onSubmit={(event) => {
+              event.preventDefault();
+              void saveTitle();
+            }}>
+              <input
+                aria-describedby={titleError ? "meeting-title-error" : undefined}
+                aria-label="录音项目名称"
+                autoFocus
+                disabled={isSavingTitle}
+                maxLength={120}
+                onChange={(event) => {
+                  setTitleDraft(event.target.value);
+                  setTitleError(null);
+                }}
+                onFocus={(event) => event.currentTarget.select()}
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") {
+                    event.preventDefault();
+                    cancelTitleEdit();
+                  }
+                }}
+                value={titleDraft}
+              />
+              <div className="transcript-title-editor-actions">
+                <button className="solid-small" disabled={isSavingTitle} type="submit">
+                  {isSavingTitle ? "保存中" : "保存"}
+                </button>
+                <button disabled={isSavingTitle} onClick={cancelTitleEdit} type="button">取消</button>
+              </div>
+              {titleError ? <p className="transcript-title-error" id="meeting-title-error">{titleError}</p> : null}
+            </form>
+          ) : (
+            <div className="transcript-title-row">
+              <h1>{meeting?.title ?? "会议文字稿"}</h1>
+              <button
+                className="title-edit-trigger"
+                onClick={() => {
+                  setTitleDraft(meeting?.title ?? "");
+                  setTitleError(null);
+                  setIsEditingTitle(true);
+                }}
+                type="button"
+              >
+                重命名
+              </button>
+            </div>
+          )}
+          <p>{formatDate(meeting?.timestamps.updatedAt)} · {segments.length} 个文字片段 · 已保存到本地</p>
+        </div>
+        <div className="transcript-actions">
+          <button onClick={onReveal} type="button">打开文件夹</button>
+          <button className="solid-small" disabled={segments.length === 0} onClick={() => void copyTranscript()} type="button">
+            {copied ? "已复制" : "复制全文"}
+          </button>
+        </div>
+      </header>
+
+      {error ? <InlineError message={error} /> : null}
+
+      {!detail && !error ? <AnalysisSkeleton /> : null}
+      {detail ? (
+        <section className="analysis-section" aria-label="AI 会议分析">
+          <div className="analysis-heading">
+            <div>
+              <p className="eyebrow">AI MEETING ANALYSIS</p>
+              <h2>会议分析</h2>
+            </div>
+            <div className="analysis-heading-action">
+              <span>{analysis?.analysisByLanguage ? "已根据完整文字稿生成" : analysis ? "检测到旧版分析格式" : "本次记录尚未生成分析"}</span>
+              {analysis?.analysisByLanguage ? <button onClick={onAnalyze} type="button">重新分析</button> : null}
+            </div>
+          </div>
+          {analysis ? (
+            analysis.analysisByLanguage ? (
+              <div className="localized-analysis">
+                <div className="analysis-language-switch" role="tablist" aria-label="分析语言">
+                  <button
+                    aria-selected={analysisLanguage === "zh"}
+                    className={analysisLanguage === "zh" ? "is-active" : ""}
+                    onClick={() => setAnalysisLanguage("zh")}
+                    role="tab"
+                    type="button"
+                  >
+                    中文分析
+                  </button>
+                  <button
+                    aria-selected={analysisLanguage === "en"}
+                    className={analysisLanguage === "en" ? "is-active" : ""}
+                    onClick={() => setAnalysisLanguage("en")}
+                    role="tab"
+                    type="button"
+                  >
+                    English
+                  </button>
+                </div>
+                <LocalizedAnalysisContent
+                  analysis={analysis.analysisByLanguage[analysisLanguage]}
+                  language={analysisLanguage}
+                />
+              </div>
+            ) : (
+              <div className="analysis-legacy-refresh">
+                <div>
+                  <p className="analysis-label">内容总结</p>
+                  <h3>把旧版内容重新整理成简洁摘要</h3>
+                  <p>当前结果包含旧格式的拼接内容。快速总结会读取已保存的文字稿，生成语言分离、无 Segment 引用的新版摘要。</p>
+                </div>
+                <button className="analysis-start-action" disabled={segments.length === 0} onClick={onAnalyze} type="button">
+                  用 AI 快速总结
+                </button>
+              </div>
+            )
+          ) : (
+            <div className="analysis-empty">
+              <div>
+                <strong>文字稿已经准备好。</strong>
+                <p>分析不会自动开始。点击后只会把已保存的文字内容发送给当前启用的模型，原始音频不会再次上传。</p>
+              </div>
+              <button className="analysis-start-action" disabled={segments.length === 0} onClick={onAnalyze} type="button">
+                开始 AI 分析
+              </button>
+            </div>
+          )}
+        </section>
+      ) : null}
+
+      <section className="transcript-layout">
+        <aside className="audio-sidebar">
+          <div className="audio-sticky">
+            <p className="eyebrow">SOURCE AUDIO</p>
+            <h2>原始音频</h2>
+            {audioTrack ? (
+              <audio controls src={audioTrack.audioUrl} />
+            ) : (
+              <div className="audio-empty">音频预览暂不可用</div>
+            )}
+            <dl>
+              <div><dt>音频来源</dt><dd>{formatTrackSummary(meeting)}</dd></div>
+              <div><dt>识别语言</dt><dd>{formatLanguage(meeting?.outputLanguage)}</dd></div>
+              <div><dt>状态</dt><dd>本地已保存</dd></div>
+            </dl>
+          </div>
+        </aside>
+
+        <div className="transcript-document">
+          <label className="transcript-search">
+            <span>搜索文字稿</span>
+            <input onChange={(event) => setQuery(event.target.value)} placeholder="输入关键词" type="search" value={query} />
+          </label>
+          {!detail && !error ? <TranscriptSkeleton /> : null}
+          {detail && visibleSegments.length === 0 ? (
+            <div className="empty-transcript">{segments.length === 0 ? "没有检测到可转写的语音。" : "没有找到匹配的文字。"}</div>
+          ) : null}
+          <div className="segment-list">
+            {visibleSegments.map((segment) => (
+              <article className="transcript-segment" key={segment.id}>
+                <div className="segment-meta">
+                  <span>{formatTimestamp(segment.startTimeMs)}</span>
+                  <strong>{segment.speakerLabel ?? trackLabel(segment.trackId)}</strong>
+                </div>
+                <p>{segment.text}</p>
+              </article>
+            ))}
+          </div>
+        </div>
+      </section>
+    </div>
+  );
 }
 
-function searchLocalMeetings(meetings: MeetingMetadata[], query: string): MeetingSearchResult[] {
-  const normalizedQuery = query.toLowerCase();
-  return meetings
-    .filter((meeting) => `${meeting.title} ${meeting.status} ${meeting.outputLanguage}`.toLowerCase().includes(normalizedQuery))
-    .map((meeting) => ({
-      meetingId: meeting.id,
-      title: meeting.title,
-      status: meeting.status,
-      updatedAt: meeting.timestamps.updatedAt,
-      matches: [
-        {
-          kind: "meeting",
-          label: "Meeting",
-          snippet: `${meeting.title} - ${meeting.status}`
-        }
-      ]
-    }));
+function LocalizedAnalysisContent({
+  analysis,
+  language
+}: {
+  analysis: LocalizedMeetingAnalysis;
+  language: "zh" | "en";
+}) {
+  const labels = language === "zh"
+    ? { overview: "内容总结", purpose: "会议目的", topics: "主题脉络", technical: "技术总结" }
+    : { overview: "Overview", purpose: "Meeting purpose", topics: "Topic breakdown", technical: "Technical summary" };
+
+  return (
+    <div className="analysis-language-panel" lang={language === "zh" ? "zh-CN" : "en"} role="tabpanel">
+      <AnalysisParagraphSection label={labels.overview} paragraphs={analysis.overview} prominent />
+      <AnalysisParagraphSection label={labels.purpose} paragraphs={analysis.purpose} />
+
+      <section className="analysis-topic-section">
+        <div className="analysis-section-label">
+          <span>{labels.topics}</span>
+          <small>{String(analysis.topics.length).padStart(2, "0")}</small>
+        </div>
+        {analysis.topics.length > 0 ? (
+          <div className="analysis-topic-list">
+            {analysis.topics.map((topic, index) => (
+              <article className="analysis-topic" key={`${topic.title}-${index}`}>
+                <span className="analysis-topic-index">{String(index + 1).padStart(2, "0")}</span>
+                <div>
+                  <h3>{topic.title}</h3>
+                  {topic.paragraphs.map((paragraph, paragraphIndex) => (
+                    <p key={paragraphIndex}>{paragraph}</p>
+                  ))}
+                </div>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <p className="analysis-no-topics">{language === "zh" ? "没有识别出独立的讨论主题。" : "No distinct discussion topics were identified."}</p>
+        )}
+      </section>
+
+      <AnalysisParagraphSection label={labels.technical} paragraphs={analysis.technicalSummary} />
+    </div>
+  );
 }
 
-function formatRecognitionLanguages(settings: AppSettings): string {
-  const enabled = [
-    settings.mandarin ? "Mandarin" : null,
-    settings.cantonese ? "Cantonese" : null,
-    settings.englishUS ? "English US" : null,
-    settings.englishGB ? "English GB" : null,
-    settings.mixedCodeSwitching ? "Code-switching" : null
-  ].filter((item): item is string => Boolean(item));
-
-  return enabled.length > 0 ? enabled.join(" / ") : "Provider auto-detect";
+function AnalysisParagraphSection({
+  label,
+  paragraphs,
+  prominent = false
+}: {
+  label: string;
+  paragraphs: string[];
+  prominent?: boolean;
+}) {
+  return (
+    <section className={`analysis-copy-section${prominent ? " is-prominent" : ""}`}>
+      <div className="analysis-section-label"><span>{label}</span></div>
+      <div className="analysis-paragraphs">
+        {paragraphs.map((paragraph, index) => <p key={index}>{paragraph}</p>)}
+      </div>
+    </section>
+  );
 }
-function formatError(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+
+function MinimalHeader({
+  label,
+  onBack,
+  onHome
+}: {
+  label: string;
+  onBack(): void;
+  onHome(): void;
+}) {
+  return (
+    <header className="minimal-header">
+      <PageNavigation onBack={onBack} onHome={onHome} />
+      <div className="wordmark">MeetMap</div>
+      <span>{label}</span>
+    </header>
+  );
 }
 
-function buildProcessingPreferences(settings: AppSettings): ProcessingPreferences {
+function PageNavigation({ onBack, onHome }: { onBack(): void; onHome(): void }) {
+  return (
+    <div className="page-navigation" aria-label="页面导航">
+      <button className="back-button" onClick={onBack} type="button">返回上一页</button>
+      <button className="home-button" onClick={onHome} type="button">主页</button>
+    </div>
+  );
+}
+
+function Field({ children, label }: { children: React.ReactNode; label: string }) {
+  return <label className="form-field"><span>{label}</span>{children}</label>;
+}
+
+function LanguageSelect({
+  disabled = false,
+  onChange,
+  value
+}: {
+  disabled?: boolean;
+  onChange(value: LanguageOptionValue): void;
+  value: LanguageOptionValue;
+}) {
+  return (
+    <select disabled={disabled} onChange={(event) => onChange(event.target.value as LanguageOptionValue)} value={value}>
+      {LANGUAGE_OPTIONS.map((option) => (
+        <option key={option.value} value={option.value}>
+          {option.value === "zh" ? "中文" : option.value === "en" ? "English" : "中英双语"}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+function LevelMeter({ active, level }: { active: boolean; level: number }) {
+  return (
+    <div className="level-meter" aria-label={`输入音量 ${Math.round(level * 100)}%`}>
+      {Array.from({ length: 18 }, (_, index) => (
+        <span className={active && index / 18 <= level ? "active" : ""} key={index} />
+      ))}
+    </div>
+  );
+}
+
+function LiveWaveform({
+  microphone,
+  paused,
+  system
+}: {
+  microphone: RecordingAudioLevel[];
+  paused: boolean;
+  system: RecordingAudioLevel[];
+}) {
+  const bars = createWaveBars(system, microphone);
+  return (
+    <div className={`live-waveform ${paused ? "paused" : ""}`} aria-label="实时音频波形">
+      {bars.map((height, index) => <span key={index} style={{ transform: `scaleY(${height})` }} />)}
+    </div>
+  );
+}
+
+function ImportLines() {
+  return (
+    <div className="import-lines" aria-hidden="true">
+      {[0.34, 0.68, 0.45, 0.82, 0.57, 0.28, 0.74, 0.48, 0.88, 0.62, 0.4, 0.72].map((value, index) => (
+        <span key={index} style={{ transform: `scaleY(${value})` }} />
+      ))}
+    </div>
+  );
+}
+
+function InlineError({ message }: { message: string }) {
+  return <div className="inline-error" role="alert"><span />{message}</div>;
+}
+
+function LoadingScreen() {
+  return (
+    <main className="transcription-app loading-screen">
+      <div className="loading-shell">
+        <div className="skeleton wordmark-skeleton" />
+        <div className="skeleton title-skeleton" />
+        <div className="skeleton path-skeleton" />
+        <div className="loading-grid"><div className="skeleton" /><div className="skeleton" /></div>
+      </div>
+    </main>
+  );
+}
+
+function TranscriptSkeleton() {
+  return (
+    <div className="transcript-skeleton">
+      {[0, 1, 2].map((item) => <div key={item}><span /><p /></div>)}
+    </div>
+  );
+}
+
+function AnalysisSkeleton() {
+  return (
+    <div className="analysis-skeleton" aria-label="正在加载会议分析">
+      <div className="skeleton" />
+      <div className="skeleton" />
+      <div className="skeleton" />
+    </div>
+  );
+}
+
+function useRecordingTimer(meeting: MeetingMetadata | null, paused: boolean): number {
+  const [elapsed, setElapsed] = useState(() => initialElapsed(meeting));
+
+  useEffect(() => {
+    if (paused) {
+      return;
+    }
+    const timer = window.setInterval(() => setElapsed((current) => current + 1), 1000);
+    return () => window.clearInterval(timer);
+  }, [paused]);
+
+  return elapsed;
+}
+
+function appendLevel<T extends AudioPreflightLevelSample>(
+  current: Partial<Record<AudioTrack, T[]>>,
+  update: T & { track: AudioTrack }
+): Partial<Record<AudioTrack, T[]>> {
+  return {
+    ...current,
+    [update.track]: [...(current[update.track] ?? []), update].slice(-96)
+  };
+}
+
+function createFallbackLevels(
+  sources: RecordingAudioSources,
+  occurredAt: string
+): Partial<Record<AudioTrack, AudioPreflightLevelSample[]>> {
+  return {
+    system: sources.system ? [{ level: 0.42, occurredAt }] : [],
+    microphone: sources.microphone ? [{ level: 0.35, occurredAt }] : []
+  };
+}
+
+function createWaveBars(system: RecordingAudioLevel[], microphone: RecordingAudioLevel[]): number[] {
+  const combined = Array.from({ length: 64 }, (_, index) => {
+    const systemLevel = system.at(index - 64)?.level ?? 0;
+    const microphoneLevel = microphone.at(index - 64)?.level ?? 0;
+    const liveLevel = Math.max(systemLevel, microphoneLevel);
+    return liveLevel > 0 ? Math.max(0.08, liveLevel) : 0.12 + ((index * 17) % 9) / 38;
+  });
+  return combined;
+}
+
+function buildProcessingPreferences(
+  settings: AppSettings,
+  transcriptOnly = true
+): ProcessingPreferences {
   return {
     autoDeleteCloudCopies: settings.autoDeleteCloudCopies,
+    customVocabulary: settings.customVocabulary,
     preserveTranscriptLanguage: settings.preserveTranscriptLanguage,
     recognitionLanguages: {
       cantonese: settings.cantonese,
@@ -1073,49 +2193,204 @@ function buildProcessingPreferences(settings: AppSettings): ProcessingPreference
       mixedCodeSwitching: settings.mixedCodeSwitching
     },
     speakerDiarization: settings.speakerDiarization,
+    summaryInstructions: settings.summaryInstructions,
+    transcriptOnly,
     uploadRecordedAudio: settings.uploadRecordedAudio,
     uploadSeparateTracks: true,
-    useOutputLanguage: true
+    useOutputLanguage: settings.useOutputLanguage
   };
 }
 
-function appendPreflightSample(
-  current: Partial<Record<"system" | "microphone", AudioPreflightLevelSample[]>>,
-  update: RecordingAudioLevel
-): Partial<Record<"system" | "microphone", AudioPreflightLevelSample[]>> {
-  const sample = {
-    level: update.level,
-    occurredAt: update.occurredAt
-  };
-  const cutoffMs = Date.parse(update.occurredAt) - 5000;
-  const existing = current[update.track] ?? [];
-
+function createInitialProgress(
+  meetingId: string,
+  mode: ProcessingMode
+): ProcessingProgressUpdate {
   return {
-    ...current,
-    [update.track]: [...existing, sample].filter(
-      (item) => Date.parse(item.occurredAt) >= cutoffMs
-    )
+    meetingId,
+    step: mode === "analysis" ? "structure_extraction" : "activity_detection",
+    currentStep: 1,
+    totalSteps: 3,
+    percent: 4,
+    updatedAt: new Date().toISOString()
   };
 }
 
-function appendRecordingLevel(
-  current: Partial<Record<"system" | "microphone", RecordingAudioLevel[]>>,
-  update: RecordingAudioLevel
-): Partial<Record<"system" | "microphone", RecordingAudioLevel[]>> {
-  const existing = current[update.track] ?? [];
+function visibleProcessingStage(
+  step: ProcessingStep | undefined,
+  mode: ProcessingMode
+): string {
+  if (mode === "analysis") {
+    return step === "word_export" || step === "completed"
+      ? "正在保存分析结果"
+      : "正在分析文字稿";
+  }
 
-  return {
-    ...current,
-    [update.track]: [...existing, update].slice(-120)
-  };
+  if (!step || step === "activity_detection") {
+    return "正在检测有效声音";
+  }
+  if (step === "transcription") {
+    return "正在生成文字";
+  }
+  if (step === "structure_extraction") {
+    return "正在生成 AI 分析";
+  }
+  return "正在保存文字稿与总结";
 }
 
-function createFallbackPreflightSamples(
-  audioSources: RecordingAudioSources,
-  now: string
-): Partial<Record<"system" | "microphone", AudioPreflightLevelSample[]>> {
-  return {
-    system: audioSources.system ? [{ level: 1, occurredAt: now }] : undefined,
-    microphone: audioSources.microphone ? [{ level: 1, occurredAt: now }] : undefined
-  };
+function processingHeading(
+  step: ProcessingStep | undefined,
+  mode: ProcessingMode
+): string {
+  if (mode === "analysis") {
+    return step === "word_export" || step === "completed"
+      ? "正在保存分析结果。"
+      : "正在理解这份文字稿。";
+  }
+
+  if (step === "structure_extraction") {
+    return "正在理解这场会议。";
+  }
+  if (step === "word_export" || step === "completed") {
+    return "正在保存最终结果。";
+  }
+  return "正在把声音变成文字。";
+}
+
+function visibleProgress(
+  progress: ProcessingProgressUpdate | null,
+  mode: ProcessingMode
+): number {
+  if (!progress) {
+    return 4;
+  }
+  if (mode === "analysis") {
+    if (progress.step === "structure_extraction") {
+      return Math.max(24, progress.percent);
+    }
+    if (progress.step === "word_export") {
+      return 88;
+    }
+    if (progress.step === "completed") {
+      return 100;
+    }
+    return Math.max(8, progress.percent);
+  }
+  if (progress.step === "activity_detection") {
+    return Math.max(8, Math.min(18, progress.percent));
+  }
+  if (progress.step === "transcription") {
+    const chunkProgress = progress.transcription && progress.transcription.totalChunks > 0
+      ? progress.transcription.completedChunks / progress.transcription.totalChunks
+      : 0.35;
+    return Math.round(20 + chunkProgress * 46);
+  }
+  if (progress.step === "merge") {
+    return 70;
+  }
+  if (progress.step === "structure_extraction") {
+    return 84;
+  }
+  if (progress.step === "word_export") {
+    return 94;
+  }
+  if (progress.step === "completed") {
+    return 100;
+  }
+  return 90;
+}
+
+function formatAudioDuration(durationMs: number | undefined): string {
+  if (!durationMs || durationMs <= 0) {
+    return "可读取";
+  }
+
+  const totalSeconds = Math.round(durationMs / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
+
+function formatByteLength(byteLength: number | undefined): string {
+  if (!byteLength || byteLength <= 0) {
+    return "已验证";
+  }
+
+  if (byteLength < 1024 * 1024) {
+    return `${Math.max(1, Math.round(byteLength / 1024))} KB`;
+  }
+
+  return `${(byteLength / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function initialElapsed(meeting: MeetingMetadata | null): number {
+  const started = meeting?.timestamps.recordingStartedAt;
+  return started ? Math.max(0, Math.floor((Date.now() - Date.parse(started)) / 1000)) : 0;
+}
+
+function formatElapsed(totalSeconds: number): string {
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  return [hours, minutes, seconds].map((value) => String(value).padStart(2, "0")).join(":");
+}
+
+function formatTimestamp(milliseconds: number): string {
+  const totalSeconds = Math.max(0, Math.floor(milliseconds / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+
+function formatDate(value: string | undefined): string {
+  if (!value) {
+    return "时间未知";
+  }
+  return new Intl.DateTimeFormat("zh-CN", {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit"
+  }).format(new Date(value));
+}
+
+function formatMeetingStatus(status: MeetingMetadata["status"]): string {
+  switch (status) {
+    case "setup": return "准备中";
+    case "recording": return "录音中";
+    case "recorded": return "待处理";
+    case "processing": return "处理中";
+    case "completed": return "已完成";
+    case "failed": return "处理失败";
+    case "no_audio": return "无有效音频";
+  }
+}
+
+function formatTrackSummary(meeting: MeetingMetadata | null): string {
+  const hasSystem = Boolean(meeting?.audioTracks.system);
+  const hasMicrophone = Boolean(meeting?.audioTracks.microphone);
+  if (hasSystem && hasMicrophone) {
+    return "系统声音 + 麦克风";
+  }
+  if (hasMicrophone) {
+    return "麦克风";
+  }
+  return "音频文件";
+}
+
+function formatLanguage(value: LanguageOptionValue | undefined): string {
+  if (value === "zh") {
+    return "中文";
+  }
+  if (value === "en") {
+    return "English";
+  }
+  return "中英双语";
+}
+
+function trackLabel(track: AudioTrack): string {
+  return track === "system" ? "系统声音" : "麦克风";
+}
+
+function formatError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

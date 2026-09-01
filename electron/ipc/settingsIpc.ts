@@ -51,11 +51,20 @@ function isAppSettings(value: unknown): value is AppSettings {
     isOneOf(value.theme, ["light", "dark"]) &&
     isOneOf(value.uiLanguage, ["en", "zh", "bi"]) &&
     typeof value.accent === "string" &&
+    isCustomVocabulary(value.customVocabulary) &&
+    typeof value.summaryInstructions === "string" &&
+    value.summaryInstructions.length <= 1000 &&
     isNullableString(value.defaultMicrophoneDeviceId) &&
     isNullableString(value.defaultSystemAudioDeviceId) &&
     booleans.every((key) => typeof value[key] === "boolean") &&
     Object.keys(value).every((key) => key in DEFAULT_APP_SETTINGS)
   );
+}
+
+function isCustomVocabulary(value: unknown): value is string[] {
+  return Array.isArray(value) &&
+    value.length <= 100 &&
+    value.every((item) => typeof item === "string" && item.trim().length > 0 && item.length <= 80);
 }
 
 function isNullableString(value: unknown): value is string | null {

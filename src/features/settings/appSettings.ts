@@ -19,6 +19,7 @@ export type AppSettings = {
   theme: ThemeMode;
   accent: string;
   cantonese: boolean;
+  customVocabulary: string[];
   defaultMicrophoneDeviceId: string | null;
   defaultSystemAudioDeviceId: string | null;
   englishGB: boolean;
@@ -32,6 +33,7 @@ export type AppSettings = {
   openAtStartup: boolean;
   preserveTranscriptLanguage: boolean;
   speakerDiarization: boolean;
+  summaryInstructions: string;
   uploadRecordedAudio: boolean;
   uploadSeparateTracks: boolean;
   useOutputLanguage: boolean;
@@ -42,6 +44,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   theme: "light",
   accent: ACCENT_OPTIONS[0],
   cantonese: false,
+  customVocabulary: [],
   defaultMicrophoneDeviceId: null,
   defaultSystemAudioDeviceId: null,
   englishGB: false,
@@ -55,6 +58,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   openAtStartup: true,
   preserveTranscriptLanguage: true,
   speakerDiarization: false,
+  summaryInstructions: "",
   uploadRecordedAudio: true,
   uploadSeparateTracks: true,
   useOutputLanguage: true

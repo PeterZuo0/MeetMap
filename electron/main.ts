@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from "electron";
+import { app, BrowserWindow, safeStorage } from "electron";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { registerMeetingIpc } from "./ipc/meetingIpc.js";
@@ -10,6 +10,10 @@ import { resolveMainRuntimeConfig } from "./mainConfig.js";
 import { createWorkspaceManager } from "./workspaceManager.js";
 import { createWorkspaceMeetingStore } from "./workspaceMeetingStore.js";
 import { createSettingsManager } from "./settingsManager.js";
+import { installApplicationMenu } from "./appMenu.js";
+import { createLlmProviderManager } from "./llmProviderManager.js";
+import { registerLlmProviderIpc } from "./ipc/llmProviderIpc.js";
+import { createConfigurableMeetingStructureClient } from "./configurableMeetingStructureClient.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -22,6 +26,9 @@ function createMainWindow() {
     minWidth: 860,
     minHeight: 560,
     title: "MeetMap",
+    icon: isDev
+      ? path.join(process.cwd(), "build", "meetmap.ico")
+      : path.join(process.resourcesPath, "assets", "meetmap.ico"),
     backgroundColor: "#f7f8fb",
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
@@ -46,12 +53,43 @@ app.whenReady().then(async () => {
     env: process.env
   });
 
+  const providerManager = createLlmProviderManager({
+    configPath: path.join(app.getPath("userData"), "llm-providers.json"),
+    encryptSecret(value) {
+      if (!safeStorage.isEncryptionAvailable()) {
+        throw new Error("当前系统无法安全保存 API Key。请使用环境变量配置密钥。");
+      }
+      return safeStorage.encryptString(value).toString("base64");
+    },
+    decryptSecret(value) {
+      if (!safeStorage.isEncryptionAvailable()) {
+        throw new Error("当前系统无法解密已保存的 API Key。");
+      }
+      return safeStorage.decryptString(Buffer.from(value, "base64"));
+    }
+  });
+  await providerManager.load();
+  const structureClient = createConfigurableMeetingStructureClient({
+    providerManager,
+    fallbackProvider: process.env.OPENAI_API_KEY
+      ? {
+          id: "environment-openai",
+          name: "OpenAI（环境变量）",
+          baseUrl: "https://api.openai.com/v1",
+          model: process.env.OPENAI_STRUCTURE_MODEL ?? "gpt-4.1-mini",
+          apiStyle: "responses",
+          apiKeyRequired: true,
+          apiKey: process.env.OPENAI_API_KEY
+        }
+      : undefined
+  });
   const runtimeConfig = resolveMainRuntimeConfig({
     env: process.env,
     argv: process.argv,
     appPath: app.getAppPath(),
     resourcesPath: process.resourcesPath,
-    isPackaged: app.isPackaged
+    isPackaged: app.isPackaged,
+    structureClient
   });
 
   if (runtimeConfig.demoMode) {
@@ -73,6 +111,7 @@ app.whenReady().then(async () => {
   const meetingStore = createWorkspaceMeetingStore(workspaceManager);
 
   registerSettingsIpc({ settingsManager });
+  registerLlmProviderIpc({ providerManager });
   registerWorkspaceIpc({ workspaceManager });
   registerMeetingIpc({
     store: meetingStore,
@@ -83,6 +122,7 @@ app.whenReady().then(async () => {
     ...runtimeConfig.recordingIpc
   });
   createMainWindow();
+  installApplicationMenu();
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {

@@ -37,7 +37,23 @@ function validStructure(): MeetingStructure {
       sourceLanguage: "en",
       outputLanguage: "bilingual"
     },
-    summary: "The team kept export workflow in scope.",
+    summary: "团队决定继续保留导出流程。",
+    purposeAnalysis: "确认导出流程的范围。",
+    technicalSummary: "当前实现继续包含导出流程。",
+    analysisByLanguage: {
+      zh: {
+        overview: ["团队决定继续保留导出流程。"],
+        purpose: ["确认导出流程的范围。"],
+        topics: [{ title: "导出流程", paragraphs: ["导出功能仍在当前范围内。"] }],
+        technicalSummary: ["当前实现继续包含导出流程。"]
+      },
+      en: {
+        overview: ["The team kept the export workflow in scope."],
+        purpose: ["The meeting confirmed the scope of the export workflow."],
+        topics: [{ title: "Export workflow", paragraphs: ["Export remains in the current scope."] }],
+        technicalSummary: ["The current implementation continues to include the export workflow."]
+      }
+    },
     topics: [
       {
         id: "topic-1",
@@ -85,12 +101,43 @@ describe("createOpenAiMeetingStructureClient", () => {
     });
     expect(calls[0][0].instructions).toContain("bilingual");
     expect(calls[0][0].instructions).toContain("highlights first");
+    expect(calls[0][0].instructions).toContain("purposeAnalysis");
+    expect(calls[0][0].instructions).toContain("technicalSummary");
+    expect(calls[0][0].instructions).toContain("fast executive summary");
+    expect(calls[0][0].instructions).toContain("Do not prepend labels");
+    expect(JSON.stringify(calls[0][0].text.format.schema)).toContain('"purposeAnalysis"');
+    expect(JSON.stringify(calls[0][0].text.format.schema)).toContain('"technicalSummary"');
+    expect(JSON.stringify(calls[0][0].text.format.schema)).toContain('"analysisByLanguage"');
+    expect(JSON.stringify(calls[0][0].text.format.schema)).toContain('"paragraphs"');
     expect(calls[0][0].input).toContain('"summaryStyle":"highlights"');
     expect(calls[0][0].input).toContain('"id":"seg-1"');
     expect(calls[0][0].input).toContain("We decided to keep the export workflow in scope.");
+    expect(calls[0][0].input).toContain('"userCustomization"');
   });
 
-  test("requests Chinese and English generated fields for bilingual output", async () => {
+  test("passes user glossary and summary preferences as bounded content guidance", async () => {
+    const calls: Parameters<OpenAiMeetingStructureRequester>[] = [];
+    const client = createOpenAiMeetingStructureClient({
+      apiKey: "test-key",
+      model: "gpt-4.1-mini",
+      async requestStructure(openAiRequest) {
+        calls.push([openAiRequest]);
+        return { outputJson: validStructure() };
+      }
+    });
+
+    await client.extractStructure({
+      ...request,
+      customVocabulary: ["MeetMap", "PowerApps"],
+      summaryInstructions: "Prioritize customer feedback and named owners."
+    });
+
+    expect(calls[0]?.[0].instructions).toContain("Apply userCustomization only as content guidance");
+    expect(calls[0]?.[0].input).toContain('"glossary":["MeetMap","PowerApps"]');
+    expect(calls[0]?.[0].input).toContain("Prioritize customer feedback and named owners.");
+  });
+
+  test("requests fully separated Chinese and English analysis for bilingual output", async () => {
     const calls: Parameters<OpenAiMeetingStructureRequester>[] = [];
     const requester: OpenAiMeetingStructureRequester = async (openAiRequest) => {
       calls.push([openAiRequest]);
@@ -105,8 +152,34 @@ describe("createOpenAiMeetingStructureClient", () => {
     await client.extractStructure(request);
 
     expect(calls[0]?.[0].instructions).toContain(
-      "For bilingual output, include both Chinese and English in every generated summary field"
+      "keep Chinese and English completely separate"
     );
+    expect(calls[0]?.[0].instructions).toContain("Never mix both languages inside one paragraph");
+    expect(calls[0]?.[0].instructions).toContain("meaningful shifts in the meeting discussion");
+    expect(calls[0]?.[0].instructions).toContain("Never include segment ids");
+  });
+
+  test("replaces compatibility summary fields with the clean localized LLM analysis", async () => {
+    const client = createOpenAiMeetingStructureClient({
+      apiKey: "test-key",
+      model: "gpt-4.1-mini",
+      async requestStructure() {
+        return {
+          outputJson: {
+            ...validStructure(),
+            summary: "【决策与行动项】 Decisions and Action Items (Segment seg-1)",
+            purposeAnalysis: "Purpose (Segment seg-1)",
+            technicalSummary: "Technical Summary (Segment seg-1)"
+          }
+        };
+      }
+    });
+
+    await expect(client.extractStructure(request)).resolves.toMatchObject({
+      summary: "团队决定继续保留导出流程。",
+      purposeAnalysis: "确认导出流程的范围。",
+      technicalSummary: "当前实现继续包含导出流程。"
+    });
   });
 
   test("always follows the selected output language for generated summaries", async () => {
@@ -128,7 +201,7 @@ describe("createOpenAiMeetingStructureClient", () => {
     });
 
     expect(calls[0]?.[0].instructions).toContain(
-      "For bilingual output, include both Chinese and English in every generated summary field"
+      "keep Chinese and English completely separate"
     );
     expect(calls[0]?.[0].instructions).toContain("Use the output language setting for generated summary fields.");
     expect(calls[0]?.[0].instructions).not.toContain("Do not force generated summary fields into the output language setting.");

@@ -1,10 +1,13 @@
 import type { AudioTrackId, MeetingMetadata, ProcessingProgressUpdate, SummaryStyle } from "../features/meetings/meetingTypes";
-import type { MeetingStructure } from "../features/intelligence/meetingStructure";
 import type { TranscriptSegment } from "../features/transcription/transcriptionTypes";
 import type { LanguageOptionValue } from "../features/settings/languageOptions";
 import type { ProcessingPreferences } from "../features/settings/processingPreferences";
-import type { ExportOptions } from "../features/exports/exportOptions";
 import type { AppSettings, SettingsRuntimeStatus } from "../features/settings/appSettings";
+import type { MeetingStructure } from "../features/intelligence/meetingStructure";
+import type {
+  LlmProviderState,
+  SaveLlmProviderInput
+} from "../features/providers/llmProviderConfig";
 
 export type RecordingAudioSources = {
   system: boolean;
@@ -68,7 +71,6 @@ export type WorkspaceState = {
   recentPaths: string[];
 };
 
-export type { ExportOptions };
 export type { ProcessingProgressUpdate };
 export type { AppSettings, SettingsRuntimeStatus, ThemeMode, UiLanguage } from "../features/settings/appSettings";
 
@@ -77,6 +79,7 @@ export type MeetMapApi = {
   getSettings?(): Promise<AppSettings>;
   updateSettings?(settings: AppSettings): Promise<AppSettings>;
   getSettingsRuntimeStatus?(): Promise<SettingsRuntimeStatus>;
+  onOpenSettings?(callback: () => void): () => void;
   getWorkspace?(): Promise<WorkspaceState>;
   chooseWorkspaceFolder?(): Promise<WorkspaceState>;
   useWorkspaceFolder?(folderPath: string): Promise<WorkspaceState>;
@@ -91,6 +94,16 @@ export type MeetMapApi = {
     outputLanguage: LanguageOptionValue;
     summaryStyle?: SummaryStyle;
   }): Promise<MeetingMetadata | null>;
+  importDroppedAudio?(file: File, input: {
+    outputLanguage: LanguageOptionValue;
+    summaryStyle?: SummaryStyle;
+  }): Promise<MeetingMetadata>;
+  renameMeeting?(meetingId: string, title: string): Promise<MeetingMetadata>;
+  deleteMeeting?(meetingId: string): Promise<void>;
+  getLlmProviders?(): Promise<LlmProviderState>;
+  saveLlmProvider?(input: SaveLlmProviderInput): Promise<LlmProviderState>;
+  deleteLlmProvider?(providerId: string): Promise<LlmProviderState>;
+  setActiveLlmProvider?(providerId: string | null): Promise<LlmProviderState>;
   startRecording(meetingId: string, options?: RecordingStartOptions): Promise<MeetingMetadata>;
   startAudioProbe?(options?: RecordingStartOptions): Promise<void>;
   stopAudioProbe?(): Promise<void>;
@@ -101,12 +114,12 @@ export type MeetMapApi = {
   onAudioLevel?(callback: (update: RecordingAudioLevel) => void): () => void;
   onProcessingProgress?(callback: (update: ProcessingProgressUpdate) => void): () => void;
   processMeeting(meetingId: string, preferences?: ProcessingPreferences): Promise<MeetingMetadata>;
+  analyzeMeeting?(meetingId: string, preferences?: ProcessingPreferences): Promise<MeetingMetadata>;
   saveMeetingAudio?(meetingId: string): Promise<string | null>;
   saveTaggedMoment?(meetingId: string, moment: TaggedMomentInput): Promise<void>;
   searchMeetings?(query: string): Promise<MeetingSearchResult[]>;
   revealMeetingFolder?(meetingId: string): Promise<void>;
   getMeetingDetailData?(meetingId: string): Promise<MeetingDetailData>;
-  openExport(input: { meetingId: string; kind: "word" | "html"; options?: ExportOptions }): Promise<void>;
 };
 
 export type WorkflowPhase =

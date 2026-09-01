@@ -11,6 +11,7 @@ import { registerMeetingIpc } from "./meetingIpc";
 const electronMock = vi.hoisted(() => ({
   ipcMainHandle: vi.fn(),
   shellOpenPath: vi.fn(),
+  shellTrashItem: vi.fn(),
   showOpenDialog: vi.fn(),
   showSaveDialog: vi.fn(),
   spawn: vi.fn()
@@ -30,7 +31,8 @@ vi.mock("electron", () => ({
     showSaveDialog: electronMock.showSaveDialog
   },
   shell: {
-    openPath: electronMock.shellOpenPath
+    openPath: electronMock.shellOpenPath,
+    trashItem: electronMock.shellTrashItem
   }
 }));
 
@@ -42,10 +44,12 @@ beforeEach(() => {
   handlers.clear();
   electronMock.ipcMainHandle.mockReset();
   electronMock.shellOpenPath.mockReset();
+  electronMock.shellTrashItem.mockReset();
   electronMock.showOpenDialog.mockReset();
   electronMock.showSaveDialog.mockReset();
   electronMock.spawn.mockReset();
   electronMock.shellOpenPath.mockResolvedValue("");
+  electronMock.shellTrashItem.mockResolvedValue(undefined);
   electronMock.showOpenDialog.mockResolvedValue({ canceled: true, filePaths: [] });
   electronMock.showSaveDialog.mockResolvedValue({ canceled: true });
   electronMock.spawn.mockImplementation((_command: string, args: string[]) => createSuccessfulSpawn(args));
@@ -238,6 +242,83 @@ test("saves a single-track meeting audio file", async () => {
     await rm(baseDirectory, { force: true, recursive: true });
   }
 });
+
+test("renames a meeting and persists the trimmed title", async () => {
+  const baseDirectory = await mkdtemp(join(tmpdir(), "meetmap-meeting-ipc-"));
+
+  try {
+    const store = createMeetingStore(baseDirectory);
+    const meeting = await store.createMeeting({
+      id: "rename-meeting",
+      title: "Original title",
+      outputLanguage: "zh"
+    });
+    registerMeetingIpc({ store });
+
+    const renamed = await getHandler("meeting:rename")(null, {
+      meetingId: meeting.id,
+      title: "  客户季度复盘  "
+    } as never) as MeetingMetadata;
+
+    expect(renamed.title).toBe("客户季度复盘");
+    expect(Date.parse(renamed.timestamps.updatedAt)).toBeGreaterThanOrEqual(
+      Date.parse(meeting.timestamps.updatedAt)
+    );
+    await expect(store.readMetadata(meeting.id)).resolves.toMatchObject({
+      id: meeting.id,
+      title: "客户季度复盘"
+    });
+  } finally {
+    await rm(baseDirectory, { force: true, recursive: true });
+  }
+});
+
+test("moves an inactive meeting project to the operating-system recycle bin", async () => {
+  const baseDirectory = await mkdtemp(join(tmpdir(), "meetmap-meeting-ipc-"));
+  try {
+    const store = createMeetingStore(baseDirectory);
+    const meeting = await store.createMeeting({
+      id: "delete-meeting",
+      title: "Delete me",
+      outputLanguage: "zh"
+    });
+    registerMeetingIpc({ store });
+
+    await expect(getHandler("meeting:delete")(null, meeting.id as never)).resolves.toBeUndefined();
+    expect(electronMock.shellTrashItem).toHaveBeenCalledWith(
+      store.getMeetingPaths(meeting.id).meetingDir
+    );
+  } finally {
+    await rm(baseDirectory, { force: true, recursive: true });
+  }
+});
+
+test.each(["   ", "x".repeat(121)])(
+  "rejects invalid renamed meeting title %j",
+  async (title) => {
+    const baseDirectory = await mkdtemp(join(tmpdir(), "meetmap-meeting-ipc-"));
+
+    try {
+      const store = createMeetingStore(baseDirectory);
+      const meeting = await store.createMeeting({
+        id: "invalid-rename",
+        title: "Original title",
+        outputLanguage: "en"
+      });
+      registerMeetingIpc({ store });
+
+      await expect(getHandler("meeting:rename")(null, {
+        meetingId: meeting.id,
+        title
+      } as never)).rejects.toThrow(/Meeting title/);
+      await expect(store.readMetadata(meeting.id)).resolves.toMatchObject({
+        title: "Original title"
+      });
+    } finally {
+      await rm(baseDirectory, { force: true, recursive: true });
+    }
+  }
+);
 
 test("mixes dual-track meeting audio before saving", async () => {
   const baseDirectory = await mkdtemp(join(tmpdir(), "meetmap-meeting-ipc-"));

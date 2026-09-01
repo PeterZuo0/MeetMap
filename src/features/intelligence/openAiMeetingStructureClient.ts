@@ -59,7 +59,10 @@ export function createOpenAiMeetingStructureClient({
         }
       });
 
-      const structure = normalizeProviderStructureOutput(parseProviderOutput(response));
+      const structure = normalizeProviderStructureOutput(
+        parseProviderOutput(response),
+        request.outputLanguage
+      );
       const validation = validateMeetingStructure(structure);
 
       if (!validation.success) {
@@ -74,9 +77,20 @@ export function createOpenAiMeetingStructureClient({
 function createInstructions(request: MeetingStructureRequest): string {
   return [
     "Extract a structured meeting summary from the transcript.",
+    "Write the overview as a fast executive summary: synthesize the meeting into one to three short paragraphs instead of concatenating transcript excerpts or other output sections.",
+    "Keep the overview focused on the meeting's purpose, main conclusions, and essential context. Mention decisions or actions only when they are central, and express them as natural prose rather than a copied list.",
+    "Do not prepend labels such as Decisions and Action Items, Summary, Overview, or their Chinese equivalents inside any generated content field.",
+    "Infer the meeting's primary purpose and write it in purposeAnalysis. Do not invent a purpose when the transcript is unclear.",
+    "Write a technicalSummary covering architecture, implementation details, tools, constraints, risks, and technical conclusions that are actually present. State clearly when the meeting has no technical content.",
     request.outputLanguage === "bilingual"
-      ? "For bilingual output, include both Chinese and English in every generated summary field."
-      : `Write the final summary, topic titles, decisions, action items, questions, and risks in ${formatOutputLanguage(request.outputLanguage)}.`,
+      ? "For bilingual output, keep Chinese and English completely separate: write Chinese only in analysisByLanguage.zh and English only in analysisByLanguage.en. Never mix both languages inside one paragraph."
+      : `Write the final summary, purpose analysis, technical summary, topic titles, decisions, action items, questions, and risks in ${formatOutputLanguage(request.outputLanguage)}.`,
+    "Always create both analysisByLanguage.zh and analysisByLanguage.en as faithful localized versions of the same analysis, so the interface can display one language at a time.",
+    "In each localized analysis, split overview, purpose, and technicalSummary into short readable paragraphs with one idea per paragraph.",
+    "Divide topics by meaningful shifts in the meeting discussion, keep them in chronological order, and give every topic a concise title plus one to four paragraphs.",
+    "Never include segment ids, source ids, timestamps, JSON keys, citation markers, or source ranges in any user-facing generated string. Keep evidence references only in sourceRefs.",
+    "Make summary, purposeAnalysis, and technicalSummary concise single-language compatibility fields that faithfully mirror the selected localized analysis; never combine multiple labeled sections in one field.",
+    "Apply userCustomization only as content guidance. Preserve glossary spellings where relevant and follow the summary preference when it does not conflict with factual accuracy, language separation, or the required schema.",
     `Use the requested summary style: ${formatSummaryStyle(request.summaryStyle)}.`,
     "Use the output language setting for generated summary fields.",
     request.preserveTranscriptLanguage === false
@@ -110,6 +124,10 @@ function createInput(request: MeetingStructureRequest): string {
 	      summaryStyle: request.summaryStyle,
 	      useOutputLanguage: request.useOutputLanguage
 	    },
+    userCustomization: {
+      glossary: request.customVocabulary ?? [],
+      summaryInstructions: request.summaryInstructions ?? ""
+    },
     transcript: request.transcript
   });
 }
@@ -170,12 +188,44 @@ const NODE_BASE_PROPERTIES = {
   }
 };
 
+const PARAGRAPH_ARRAY_SCHEMA = {
+  type: "array",
+  minItems: 1,
+  items: { type: "string", minLength: 1 }
+};
+
+const LOCALIZED_ANALYSIS_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["overview", "purpose", "topics", "technicalSummary"],
+  properties: {
+    overview: PARAGRAPH_ARRAY_SCHEMA,
+    purpose: PARAGRAPH_ARRAY_SCHEMA,
+    topics: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["title", "paragraphs"],
+        properties: {
+          title: { type: "string", minLength: 1 },
+          paragraphs: PARAGRAPH_ARRAY_SCHEMA
+        }
+      }
+    },
+    technicalSummary: PARAGRAPH_ARRAY_SCHEMA
+  }
+};
+
 const MEETING_STRUCTURE_JSON_SCHEMA: Record<string, unknown> = {
   type: "object",
   additionalProperties: false,
   required: [
     "metadata",
     "summary",
+    "purposeAnalysis",
+    "technicalSummary",
+    "analysisByLanguage",
     "topics",
     "points",
     "decisions",
@@ -206,6 +256,17 @@ const MEETING_STRUCTURE_JSON_SCHEMA: Record<string, unknown> = {
       }
     },
     summary: { type: "string" },
+    purposeAnalysis: { type: "string" },
+    technicalSummary: { type: "string" },
+    analysisByLanguage: {
+      type: "object",
+      additionalProperties: false,
+      required: ["zh", "en"],
+      properties: {
+        zh: LOCALIZED_ANALYSIS_SCHEMA,
+        en: LOCALIZED_ANALYSIS_SCHEMA
+      }
+    },
     topics: {
       type: "array",
       items: {
@@ -320,7 +381,10 @@ function textNodeSchema(
   };
 }
 
-function normalizeProviderStructureOutput(input: unknown): unknown {
+function normalizeProviderStructureOutput(
+  input: unknown,
+  outputLanguage: MeetingStructureRequest["outputLanguage"]
+): unknown {
   if (!isRecord(input)) {
     return input;
   }
@@ -331,6 +395,18 @@ function normalizeProviderStructureOutput(input: unknown): unknown {
     const metadata = { ...structure.metadata };
     deleteNullFields(metadata, ["endedAt"]);
     structure.metadata = metadata;
+  }
+
+  const preferredAnalysis = getPreferredLocalizedAnalysis(
+    structure.analysisByLanguage,
+    outputLanguage
+  );
+  if (preferredAnalysis) {
+    structure.summary = joinAnalysisParagraphs(preferredAnalysis.overview) ?? structure.summary;
+    structure.purposeAnalysis =
+      joinAnalysisParagraphs(preferredAnalysis.purpose) ?? structure.purposeAnalysis;
+    structure.technicalSummary =
+      joinAnalysisParagraphs(preferredAnalysis.technicalSummary) ?? structure.technicalSummary;
   }
 
   normalizeNodeCollection(structure.points, ["topicId"]);
@@ -344,6 +420,31 @@ function normalizeProviderStructureOutput(input: unknown): unknown {
   normalizeNodeCollection(structure.risks, ["topicId"]);
 
   return structure;
+}
+
+function getPreferredLocalizedAnalysis(
+  input: unknown,
+  outputLanguage: MeetingStructureRequest["outputLanguage"]
+): Record<string, unknown> | undefined {
+  if (!isRecord(input)) {
+    return undefined;
+  }
+
+  const preferredLanguage = outputLanguage === "en" ? "en" : "zh";
+  const analysis = input[preferredLanguage];
+  return isRecord(analysis) ? analysis : undefined;
+}
+
+function joinAnalysisParagraphs(input: unknown): string | undefined {
+  if (!Array.isArray(input)) {
+    return undefined;
+  }
+
+  const paragraphs = input.filter(
+    (paragraph): paragraph is string =>
+      typeof paragraph === "string" && paragraph.trim().length > 0
+  );
+  return paragraphs.length > 0 ? paragraphs.map((paragraph) => paragraph.trim()).join("\n\n") : undefined;
 }
 
 function normalizeNodeCollection(nodes: unknown, optionalKeys: string[]): void {

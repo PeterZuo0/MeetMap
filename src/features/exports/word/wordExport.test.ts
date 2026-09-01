@@ -12,6 +12,8 @@ function meetingStructure(): MeetingStructure {
       outputLanguage: "en"
     },
     summary: "The team aligned on MVP priorities and follow-up actions.",
+    purposeAnalysis: "Confirm the transcription MVP scope and delivery sequence.",
+    technicalSummary: "The Word export is generated from validated structured meeting JSON.",
     topics: [
       {
         id: "topic-1",
@@ -92,6 +94,14 @@ test("maps meeting structure JSON to ordered Word summary sections", () => {
       items: ["The team aligned on MVP priorities and follow-up actions."]
     },
     {
+      title: "Meeting Purpose",
+      items: ["Confirm the transcription MVP scope and delivery sequence."]
+    },
+    {
+      title: "Technical Summary",
+      items: ["The Word export is generated from validated structured meeting JSON."]
+    },
+    {
       title: "Key Topics",
       items: [
         "MVP scope: The team reviewed scope for the first release.",
@@ -141,6 +151,8 @@ test("omits disabled Word export sections and timestamps", () => {
   expect(sections.map((section) => section.title)).toEqual([
     "Meeting Overview",
     "Executive Summary",
+    "Meeting Purpose",
+    "Technical Summary",
     "Key Topics",
     "Open Questions",
     "Risks and Follow-ups"

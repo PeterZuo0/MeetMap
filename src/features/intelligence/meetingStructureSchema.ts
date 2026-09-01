@@ -33,6 +33,9 @@ export function validateMeetingStructure(input: unknown): MeetingStructureValida
 
   requireRecord(input, "metadata", errors);
   requireString(input, "summary", errors);
+  requireOptionalString(input, "purposeAnalysis", errors);
+  requireOptionalString(input, "technicalSummary", errors);
+  validateOptionalLocalizedAnalysis(input.analysisByLanguage, errors);
   requireArray(input, "topics", errors);
   requireArray(input, "decisions", errors);
   requireArray(input, "actionItems", errors);
@@ -90,6 +93,58 @@ export function validateMeetingStructure(input: unknown): MeetingStructureValida
   }
 
   return { success: errors.length === 0, errors };
+}
+
+function validateOptionalLocalizedAnalysis(input: unknown, errors: string[]) {
+  if (input === undefined) {
+    return;
+  }
+
+  if (!isRecord(input)) {
+    errors.push("analysisByLanguage must be an object");
+    return;
+  }
+
+  validateLocalizedAnalysis(input.zh, "analysisByLanguage.zh", errors);
+  validateLocalizedAnalysis(input.en, "analysisByLanguage.en", errors);
+}
+
+function validateLocalizedAnalysis(input: unknown, path: string, errors: string[]) {
+  if (!requireItemRecord(input, path, errors)) {
+    return;
+  }
+
+  validateParagraphs(input.overview, `${path}.overview`, errors);
+  validateParagraphs(input.purpose, `${path}.purpose`, errors);
+  validateParagraphs(input.technicalSummary, `${path}.technicalSummary`, errors);
+
+  if (!Array.isArray(input.topics)) {
+    errors.push(`${path}.topics is required`);
+    return;
+  }
+
+  input.topics.forEach((topic, index) => {
+    const topicPath = `${path}.topics[${index}]`;
+    if (!requireItemRecord(topic, topicPath, errors)) {
+      return;
+    }
+
+    requireString(topic, "title", errors, `${topicPath}.title`);
+    validateParagraphs(topic.paragraphs, `${topicPath}.paragraphs`, errors);
+  });
+}
+
+function validateParagraphs(input: unknown, path: string, errors: string[]) {
+  if (!Array.isArray(input)) {
+    errors.push(`${path} is required`);
+    return;
+  }
+
+  input.forEach((paragraph, index) => {
+    if (typeof paragraph !== "string" || paragraph.trim().length === 0) {
+      errors.push(`${path}[${index}] must be a non-empty string`);
+    }
+  });
 }
 
 function validateMetadata(input: Record<string, unknown>, errors: string[]) {

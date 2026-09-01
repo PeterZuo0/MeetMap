@@ -5,6 +5,7 @@ import type { MeetingStructure } from "./meetingStructure.js";
 import { validateMeetingStructure } from "./meetingStructureSchema.js";
 
 export type MeetingStructureRequest = {
+  customVocabulary?: string[];
   meetingId: string;
   title: string;
   startedAt: string;
@@ -12,6 +13,7 @@ export type MeetingStructureRequest = {
   outputLanguage: MeetingMetadata["outputLanguage"];
   preserveTranscriptLanguage?: boolean;
   summaryStyle: NonNullable<MeetingMetadata["summaryStyle"]>;
+  summaryInstructions?: string;
   transcript: TranscriptSegment[];
   useOutputLanguage?: boolean;
 };
@@ -30,6 +32,9 @@ export function createMeetingStructureRequest({
   transcript: TranscriptSegment[];
 }): MeetingStructureRequest {
   return {
+    ...(preferences?.customVocabulary?.length
+      ? { customVocabulary: preferences.customVocabulary }
+      : {}),
     meetingId: metadata.id,
     title: metadata.title,
     startedAt:
@@ -38,6 +43,9 @@ export function createMeetingStructureRequest({
     outputLanguage: metadata.outputLanguage,
     preserveTranscriptLanguage: preferences?.preserveTranscriptLanguage,
     summaryStyle: metadata.summaryStyle ?? "decisions_actions",
+    ...(preferences?.summaryInstructions
+      ? { summaryInstructions: preferences.summaryInstructions }
+      : {}),
     transcript,
     useOutputLanguage: preferences?.useOutputLanguage
   };

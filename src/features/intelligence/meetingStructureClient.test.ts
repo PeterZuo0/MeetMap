@@ -83,6 +83,35 @@ describe("createMeetingStructureRequest", () => {
       transcript
     });
   });
+
+  test("maps user glossary and summary preferences into the provider-neutral request", () => {
+    const request = createMeetingStructureRequest({
+      metadata,
+      preferences: {
+        autoDeleteCloudCopies: true,
+        customVocabulary: ["MeetMap", "PowerApps"],
+        preserveTranscriptLanguage: true,
+        recognitionLanguages: {
+          cantonese: false,
+          englishGB: false,
+          englishUS: true,
+          mandarin: true,
+          mixedCodeSwitching: true
+        },
+        speakerDiarization: false,
+        summaryInstructions: "Prioritize customer feedback.",
+        uploadRecordedAudio: true,
+        uploadSeparateTracks: true,
+        useOutputLanguage: true
+      },
+      transcript
+    });
+
+    expect(request).toMatchObject({
+      customVocabulary: ["MeetMap", "PowerApps"],
+      summaryInstructions: "Prioritize customer feedback."
+    });
+  });
 });
 
 describe("extractValidatedMeetingStructure", () => {

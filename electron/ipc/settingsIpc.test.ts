@@ -54,9 +54,26 @@ test("returns and updates persisted application settings", async () => {
   await expect(
     getHandler("settings:update")(null, {
       ...DEFAULT_APP_SETTINGS,
+      customVocabulary: ["MeetMap"],
+      summaryInstructions: "突出行动项。",
       uiLanguage: "zh"
     } as never)
   ).resolves.toEqual(expect.objectContaining({ uiLanguage: "zh" }));
+});
+
+test("rejects malformed custom content", async () => {
+  const settingsManager = {
+    get: vi.fn(async () => DEFAULT_APP_SETTINGS),
+    getRuntimeStatus: vi.fn(),
+    update: vi.fn()
+  };
+  registerSettingsIpc({ settingsManager });
+
+  await expect(getHandler("settings:update")(null, {
+    ...DEFAULT_APP_SETTINGS,
+    customVocabulary: [""],
+    summaryInstructions: "x".repeat(1001)
+  } as never)).rejects.toThrow("Invalid application settings");
 });
 
 test("rejects malformed settings updates at the IPC boundary", async () => {

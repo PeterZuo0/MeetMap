@@ -28,16 +28,41 @@ test("persists settings and reloads them from disk", async () => {
     const manager = createSettingsManager({ configPath });
     await manager.update({
       ...DEFAULT_APP_SETTINGS,
+      customVocabulary: ["MeetMap", "PowerApps"],
       defaultOutputLanguage: "en",
-      defaultMicrophoneDeviceId: "microphone:usb"
+      defaultMicrophoneDeviceId: "microphone:usb",
+      summaryInstructions: "优先总结客户反馈。"
     });
 
     await expect(createSettingsManager({ configPath }).load()).resolves.toEqual(
       expect.objectContaining({
         defaultOutputLanguage: "en",
-        defaultMicrophoneDeviceId: "microphone:usb"
+        defaultMicrophoneDeviceId: "microphone:usb",
+        customVocabulary: ["MeetMap", "PowerApps"],
+        summaryInstructions: "优先总结客户反馈。"
       })
     );
+  } finally {
+    await rm(baseDirectory, { force: true, recursive: true });
+  }
+});
+
+test("normalizes invalid or duplicated custom content from disk", async () => {
+  const baseDirectory = await mkdtemp(join(tmpdir(), "meetmap-settings-manager-"));
+
+  try {
+    const configPath = join(baseDirectory, "settings.json");
+    const manager = createSettingsManager({ configPath });
+    await manager.update({
+      ...DEFAULT_APP_SETTINGS,
+      customVocabulary: [" MeetMap ", "MeetMap", "", "x".repeat(81)],
+      summaryInstructions: `  ${"a".repeat(1100)}  `
+    });
+
+    await expect(manager.get()).resolves.toMatchObject({
+      customVocabulary: ["MeetMap"],
+      summaryInstructions: "a".repeat(1000)
+    });
   } finally {
     await rm(baseDirectory, { force: true, recursive: true });
   }

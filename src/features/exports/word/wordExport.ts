@@ -53,6 +53,14 @@ export function buildWordExportSections(
     {
       title: "Executive Summary",
       items: [structure.summary]
+    },
+    {
+      title: "Meeting Purpose",
+      items: [structure.purposeAnalysis ?? "No explicit meeting purpose was identified."]
+    },
+    {
+      title: "Technical Summary",
+      items: [structure.technicalSummary ?? "No explicit technical content was identified."]
     }
   ];
 

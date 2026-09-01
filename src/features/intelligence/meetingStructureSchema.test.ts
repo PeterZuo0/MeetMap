@@ -78,6 +78,34 @@ test("accepts a complete valid meeting structure", () => {
   });
 });
 
+test("accepts and validates paragraph-based localized analysis", () => {
+  const structure: MeetingStructure = {
+    ...validStructure(),
+    analysisByLanguage: {
+      zh: {
+        overview: ["团队确认了 MVP 范围。"],
+        purpose: ["明确发布优先级。"],
+        topics: [{ title: "MVP 范围", paragraphs: ["团队讨论了首个版本的范围。"] }],
+        technicalSummary: ["优先完成 Word 导出。"]
+      },
+      en: {
+        overview: ["The team confirmed the MVP scope."],
+        purpose: ["The meeting clarified release priorities."],
+        topics: [{ title: "MVP scope", paragraphs: ["The team discussed the first release scope."] }],
+        technicalSummary: ["Word export is the first implementation priority."]
+      }
+    }
+  };
+
+  expect(validateMeetingStructure(structure)).toEqual({ success: true, errors: [] });
+
+  structure.analysisByLanguage!.en.topics[0].paragraphs = [""];
+  expect(validateMeetingStructure(structure)).toEqual({
+    success: false,
+    errors: ["analysisByLanguage.en.topics[0].paragraphs[0] must be a non-empty string"]
+  });
+});
+
 test("rejects missing required top-level fields", () => {
   const structure = validStructure() as Partial<MeetingStructure>;
   delete structure.summary;

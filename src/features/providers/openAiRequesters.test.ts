@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 
 import {
   createOpenAiAudioTranscriptionRequester,
+  createOpenAiCompatibleMeetingStructureRequester,
   createOpenAiMeetingStructureRequester
 } from "./openAiRequesters";
 
@@ -158,6 +159,52 @@ describe("createOpenAiAudioTranscriptionRequester", () => {
         timestampGranularities: ["segment"]
       })
     ).rejects.toThrow("OpenAI request failed: invalid API key.");
+  });
+});
+
+describe("createOpenAiCompatibleMeetingStructureRequester", () => {
+  test("supports local Chat Completions servers without sending an empty authorization header", async () => {
+    const calls: unknown[] = [];
+    const requester = createOpenAiCompatibleMeetingStructureRequester({
+      apiStyle: "chat_completions",
+      baseUrl: "http://localhost:11434/v1/",
+      async fetch(input, init) {
+        calls.push([input, init]);
+        return {
+          ok: true,
+          status: 200,
+          async json() {
+            return { choices: [{ message: { content: "{\"summary\":\"ok\"}" } }] };
+          }
+        };
+      }
+    });
+
+    await expect(requester({
+      apiKey: "",
+      model: "qwen3:8b",
+      instructions: "Extract",
+      input: "{}",
+      text: {
+        format: {
+          type: "json_schema",
+          name: "meeting_structure",
+          strict: true,
+          schema: { type: "object" }
+        }
+      }
+    })).resolves.toEqual({ outputText: "{\"summary\":\"ok\"}" });
+
+    const [url, init] = calls[0] as [string, { headers: Record<string, string>; body: string }];
+    expect(url).toBe("http://localhost:11434/v1/chat/completions");
+    expect(init.headers).not.toHaveProperty("Authorization");
+    expect(JSON.parse(init.body)).toMatchObject({
+      model: "qwen3:8b",
+      response_format: {
+        type: "json_schema",
+        json_schema: { name: "meeting_structure", strict: true }
+      }
+    });
   });
 });
 

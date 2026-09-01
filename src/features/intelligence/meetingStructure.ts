@@ -95,9 +95,28 @@ export type MeetingRelation = {
   toId: string;
 };
 
+export type LocalizedMeetingTopicSection = {
+  title: string;
+  paragraphs: string[];
+};
+
+export type LocalizedMeetingAnalysis = {
+  overview: string[];
+  purpose: string[];
+  topics: LocalizedMeetingTopicSection[];
+  technicalSummary: string[];
+};
+
 export type MeetingStructure = {
   metadata: MeetingMetadata;
   summary: string;
+  purposeAnalysis?: string;
+  technicalSummary?: string;
+  /** Optional so meeting analyses saved before the localized format remain readable. */
+  analysisByLanguage?: {
+    zh: LocalizedMeetingAnalysis;
+    en: LocalizedMeetingAnalysis;
+  };
   topics: MeetingTopic[];
   points?: MeetingPoint[];
   decisions: MeetingDecision[];

@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import type {
   MeetingAudioTracks,
   MeetingId,
@@ -13,7 +13,6 @@ import { decideVoiceActivity, type VoiceActivityDecision } from "../audio-analys
 import type { MeetingStructure, SourceReference } from "../intelligence/meetingStructure.js";
 import { validateMeetingStructure } from "../intelligence/meetingStructureSchema.js";
 import { createWordSummaryDocx } from "../exports/word/wordExport.js";
-import { createHtmlMeetingMap } from "../exports/html-map/htmlMapExport.js";
 import type { ProcessingPreferences } from "../settings/processingPreferences.js";
 import type { DiarizationClient, DiarizationResult } from "../diarization/diarizationTypes.js";
 import { applyDiarizationToTranscript } from "../diarization/transcriptDiarization.js";
@@ -92,6 +91,47 @@ export async function processMeeting({
   }
 
   try {
+    if (preferences?.analysisOnly) {
+      if (!metadata.transcriptPath) {
+        throw new Error("A saved transcript is required before GPT analysis");
+      }
+
+      const storedTranscript = await readStoredTranscript(paths.transcriptPath);
+      await persist("structure_extraction", {
+        status: "processing",
+        timestamps: {
+          ...metadata.timestamps,
+          processingStartedAt: metadata.timestamps.processingStartedAt ?? new Date().toISOString()
+        }
+      });
+      const structure = await workflowServices.extractStructure(storedTranscript, metadata, preferences);
+      const validation = validateMeetingStructure(structure);
+      if (!validation.success) {
+        throw new Error(`Invalid meeting structure: ${validation.errors.join("; ")}`);
+      }
+      await writeFile(paths.structurePath, `${JSON.stringify(structure, null, 2)}\n`);
+
+      await mkdir(paths.exportsDir, { recursive: true });
+      await persist("word_export", {
+        structurePath: paths.structurePath
+      });
+      await writeFile(paths.wordExportPath, await createWordSummaryDocx(structure));
+
+      await persist("completed", {
+        status: "completed",
+        exportPaths: {
+          wordSummaryPath: paths.wordExportPath,
+          htmlMeetingMapPath: null
+        },
+        timestamps: {
+          ...metadata.timestamps,
+          completedAt: new Date().toISOString()
+        }
+      });
+
+      return { metadata, transcript: storedTranscript, structure };
+    }
+
     await persist("activity_detection", {
       status: "processing",
       timestamps: {
@@ -144,6 +184,22 @@ export async function processMeeting({
       `${JSON.stringify({ segments: mergedTranscript }, null, 2)}\n`
     );
 
+    if (preferences?.transcriptOnly) {
+      await persist("completed", {
+        status: "completed",
+        structurePath: null,
+        exportPaths: {
+          wordSummaryPath: null,
+          htmlMeetingMapPath: null
+        },
+        timestamps: {
+          ...metadata.timestamps,
+          completedAt: new Date().toISOString()
+        }
+      });
+      return { metadata, transcript: mergedTranscript, structure: null };
+    }
+
     await persist("structure_extraction");
     const structure = await workflowServices.extractStructure(mergedTranscript, metadata, preferences);
     const validation = validateMeetingStructure(structure);
@@ -158,19 +214,11 @@ export async function processMeeting({
     });
     await writeFile(paths.wordExportPath, await createWordSummaryDocx(structure));
 
-    await persist("html_map_export", {
-      exportPaths: {
-        ...metadata.exportPaths,
-        wordSummaryPath: paths.wordExportPath
-      }
-    });
-    await writeFile(paths.htmlMapExportPath, createHtmlMeetingMap(structure), "utf8");
-
     await persist("completed", {
       status: "completed",
       exportPaths: {
         wordSummaryPath: paths.wordExportPath,
-        htmlMeetingMapPath: paths.htmlMapExportPath
+        htmlMeetingMapPath: null
       },
       timestamps: {
         ...metadata.timestamps,
@@ -191,13 +239,31 @@ export async function processMeeting({
   }
 }
 
+async function readStoredTranscript(filePath: string): Promise<TranscriptSegment[]> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(await readFile(filePath, "utf8"));
+  } catch (error) {
+    throw new Error("Saved transcript could not be read for GPT analysis", { cause: error });
+  }
+
+  if (!isRecord(parsed) || !Array.isArray(parsed.segments)) {
+    throw new Error("Saved transcript is invalid");
+  }
+
+  return parsed.segments as TranscriptSegment[];
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 const PROGRESS_STEPS: ProcessingStep[] = [
   "activity_detection",
   "transcription",
   "merge",
   "structure_extraction",
-  "word_export",
-  "html_map_export"
+  "word_export"
 ];
 
 function createProcessingProgressUpdate({
@@ -341,6 +407,28 @@ function createDemoMeetingStructure(
     summary:
       transcript.map((segment) => segment.text).join(" ") ||
       "Demo processing completed without transcript content.",
+    purposeAnalysis: "Validate the meeting transcription and analysis workflow.",
+    technicalSummary: "The demo validates audio detection, transcript generation, structured GPT analysis, and local persistence.",
+    analysisByLanguage: {
+      zh: {
+        overview: ["团队完成了会后语音转写与分析流程的演示验证。"],
+        purpose: ["验证会议录音能否稳定生成文字稿，并在用户确认后生成结构化分析。"],
+        topics: [{
+          title: "会后处理流程",
+          paragraphs: ["会议确认了录音、转写、分析与本地保存之间的处理顺序。"]
+        }],
+        technicalSummary: ["演示覆盖音频检测、文字稿生成、结构化 GPT 分析以及本地持久化。"]
+      },
+      en: {
+        overview: ["The team completed a demo validation of the post-meeting transcription and analysis workflow."],
+        purpose: ["The meeting validated that recorded audio can produce a reliable transcript and a structured analysis after user confirmation."],
+        topics: [{
+          title: "Post-meeting workflow",
+          paragraphs: ["The discussion confirmed the processing order for recording, transcription, analysis, and local persistence."]
+        }],
+        technicalSummary: ["The demo covers audio detection, transcript generation, structured GPT analysis, and local persistence."]
+      }
+    },
     topics: [
       {
         id: topicId,

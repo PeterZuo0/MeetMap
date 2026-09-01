@@ -27,9 +27,18 @@ export type CreateMeetingIpcInput = {
   summaryStyle?: string;
 };
 
+export type RenameMeetingIpcInput = {
+  meetingId: string;
+  title: string;
+};
+
 export type ImportAudioIpcInput = {
   outputLanguage: string;
   summaryStyle?: string;
+};
+
+export type ImportAudioPathIpcInput = ImportAudioIpcInput & {
+  sourcePath: string;
 };
 
 export type OpenExportIpcInput = {
@@ -80,12 +89,8 @@ export function registerMeetingIpc({
     "meeting:create",
     async (_event, input: unknown): Promise<MeetingMetadata> => {
       const request = parseCreateMeetingInput(input);
-      const title = request.title.trim();
+      const title = parseMeetingTitle(request.title);
       const language = parseLanguageOption(request.outputLanguage);
-
-      if (title.length === 0) {
-        throw new Error("Meeting title is required");
-      }
 
       if (!language) {
         throw new Error("Unsupported output language");
@@ -121,8 +126,68 @@ export function registerMeetingIpc({
     }
   );
 
+  ipcMain.handle(
+    "meeting:analyze",
+    async (
+      _event,
+      meetingId: unknown,
+      preferences?: unknown
+    ): Promise<MeetingMetadata> => {
+      const parsedMeetingId = parseMeetingId(meetingId);
+      const parsedPreferences = parseProcessingPreferences(preferences);
+      if (!parsedPreferences) {
+        throw new Error("Processing preferences are required for AI analysis");
+      }
+
+      const result = await processMeeting({
+        store,
+        meetingId: parsedMeetingId,
+        mode: workflowMode,
+        preferences: {
+          ...parsedPreferences,
+          analysisOnly: true,
+          transcriptOnly: false
+        },
+        services: workflowServices,
+        onProgress(progress) {
+          sendProcessingProgress(_event, progress);
+        }
+      });
+      return result.metadata;
+    }
+  );
+
   ipcMain.handle("meeting:list", async (): Promise<MeetingMetadata[]> => {
     return store.listMeetings();
+  });
+
+  ipcMain.handle(
+    "meeting:rename",
+    async (_event, input: unknown): Promise<MeetingMetadata> => {
+      const request = parseRenameMeetingInput(input);
+      const metadata = await store.readMetadata(request.meetingId);
+      const renamedMeeting: MeetingMetadata = {
+        ...metadata,
+        title: request.title,
+        timestamps: {
+          ...metadata.timestamps,
+          updatedAt: new Date().toISOString()
+        }
+      };
+
+      await store.writeMetadata(renamedMeeting);
+      return renamedMeeting;
+    }
+  );
+
+  ipcMain.handle("meeting:delete", async (_event, meetingId: unknown): Promise<void> => {
+    const parsedMeetingId = parseMeetingId(meetingId);
+    const metadata = await store.readMetadata(parsedMeetingId);
+    if (metadata.status === "recording" || metadata.status === "processing") {
+      throw new Error("录音或处理中的会议不能删除。");
+    }
+    const paths = store.getMeetingPaths(parsedMeetingId);
+    await shell.trashItem(paths.meetingDir);
   });
 
   ipcMain.handle("meeting:search", async (_event, query: unknown): Promise<MeetingSearchResult[]> => {
@@ -155,6 +220,25 @@ export function registerMeetingIpc({
 
       return importAudioAsMeeting({
         sourcePath: result.filePaths[0],
+        outputLanguage: language.value,
+        summaryStyle: parseSummaryStyle(request.summaryStyle),
+        store
+      });
+    }
+  );
+
+  ipcMain.handle(
+    "meeting:import-audio-path",
+    async (_event, input: unknown): Promise<MeetingMetadata> => {
+      const request = parseImportAudioPathInput(input);
+      const language = parseLanguageOption(request.outputLanguage);
+
+      if (!language) {
+        throw new Error("Unsupported output language");
+      }
+
+      return importAudioAsMeeting({
+        sourcePath: request.sourcePath,
         outputLanguage: language.value,
         summaryStyle: parseSummaryStyle(request.summaryStyle),
         store
@@ -525,6 +609,41 @@ function parseImportAudioInput(value: unknown): ImportAudioIpcInput {
   };
 }
 
+function parseRenameMeetingInput(value: unknown): RenameMeetingIpcInput {
+  if (!isRecord(value) || typeof value.title !== "string") {
+    throw new Error("Invalid rename meeting request");
+  }
+
+  return {
+    meetingId: parseMeetingId(value.meetingId),
+    title: parseMeetingTitle(value.title)
+  };
+}
+
+function parseMeetingTitle(value: string): string {
+  const title = value.trim();
+  if (title.length === 0) {
+    throw new Error("Meeting title is required");
+  }
+  if (title.length > 120) {
+    throw new Error("Meeting title must be 120 characters or fewer");
+  }
+
+  return title;
+}
+
+function parseImportAudioPathInput(value: unknown): ImportAudioPathIpcInput {
+  const request = parseImportAudioInput(value);
+  if (!isRecord(value) || typeof value.sourcePath !== "string" || value.sourcePath.trim().length === 0) {
+    throw new Error("Invalid audio import path");
+  }
+
+  return {
+    ...request,
+    sourcePath: value.sourcePath
+  };
+}
+
 function parseMeetingId(value: unknown): string {
   if (typeof value !== "string" || value.trim().length === 0) {
     throw new Error("Invalid meeting id");
@@ -671,6 +790,9 @@ function parseProcessingPreferences(value: unknown): ProcessingPreferences | und
 
   const preferences = {
     autoDeleteCloudCopies: value.autoDeleteCloudCopies,
+    ...(isStringArray(value.customVocabulary)
+      ? { customVocabulary: value.customVocabulary.map((item) => item.trim()) }
+      : {}),
     preserveTranscriptLanguage: value.preserveTranscriptLanguage,
     recognitionLanguages: {
       cantonese: value.recognitionLanguages.cantonese,
@@ -680,12 +802,24 @@ function parseProcessingPreferences(value: unknown): ProcessingPreferences | und
       mixedCodeSwitching: value.recognitionLanguages.mixedCodeSwitching
     },
     speakerDiarization: value.speakerDiarization,
+    ...(typeof value.summaryInstructions === "string"
+      ? { summaryInstructions: value.summaryInstructions.trim() }
+      : {}),
+    ...(typeof value.analysisOnly === "boolean"
+      ? { analysisOnly: value.analysisOnly }
+      : {}),
+    ...(typeof value.transcriptOnly === "boolean"
+      ? { transcriptOnly: value.transcriptOnly }
+      : {}),
     uploadRecordedAudio: value.uploadRecordedAudio,
     uploadSeparateTracks: value.uploadSeparateTracks,
     useOutputLanguage: value.useOutputLanguage
   };
 
   if (
+    (value.customVocabulary !== undefined && !isValidCustomVocabulary(value.customVocabulary)) ||
+    (value.summaryInstructions !== undefined &&
+      (typeof value.summaryInstructions !== "string" || value.summaryInstructions.length > 1000)) ||
     !allBooleans([
       preferences.autoDeleteCloudCopies,
       preferences.preserveTranscriptLanguage,
@@ -760,6 +894,16 @@ function parseExportOptions(value: unknown): ExportOptions | undefined {
     timestamps: value.timestamps,
     transcript: value.transcript
   } as ExportOptions;
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === "string");
+}
+
+function isValidCustomVocabulary(value: unknown): value is string[] {
+  return isStringArray(value) &&
+    value.length <= 100 &&
+    value.every((item) => item.trim().length > 0 && item.length <= 80);
 }
 
 function parseTaggedMomentInput(value: unknown): TaggedMomentInput {

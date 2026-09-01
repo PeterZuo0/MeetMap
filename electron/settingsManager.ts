@@ -84,17 +84,35 @@ function normalizeSettings(input: unknown): AppSettings {
     ...DEFAULT_APP_SETTINGS,
     ...candidate,
     accent: typeof candidate.accent === "string" ? candidate.accent : DEFAULT_APP_SETTINGS.accent,
+    customVocabulary: normalizeCustomVocabulary(candidate.customVocabulary),
     defaultMicrophoneDeviceId: normalizeNullableString(candidate.defaultMicrophoneDeviceId),
     defaultSystemAudioDeviceId: normalizeNullableString(candidate.defaultSystemAudioDeviceId),
     defaultOutputLanguage: isOneOf(candidate.defaultOutputLanguage, ["zh", "en", "bilingual"])
       ? candidate.defaultOutputLanguage
       : DEFAULT_APP_SETTINGS.defaultOutputLanguage,
     speakerDiarization: false,
+    summaryInstructions: normalizeSummaryInstructions(candidate.summaryInstructions),
     theme: isOneOf(candidate.theme, ["light", "dark"]) ? candidate.theme : DEFAULT_APP_SETTINGS.theme,
     uploadSeparateTracks: true,
     useOutputLanguage: true,
     uiLanguage: isOneOf(candidate.uiLanguage, ["en", "zh", "bi"]) ? candidate.uiLanguage : DEFAULT_APP_SETTINGS.uiLanguage
   } as AppSettings;
+}
+
+function normalizeCustomVocabulary(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return [...new Set(value
+    .filter((item): item is string => typeof item === "string")
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0 && item.length <= 80))]
+    .slice(0, 100);
+}
+
+function normalizeSummaryInstructions(value: unknown): string {
+  return typeof value === "string" ? value.trim().slice(0, 1000) : "";
 }
 
 function normalizeNullableString(value: unknown): string | null {

@@ -207,7 +207,7 @@ describe("runProductionSmoke", () => {
       await expect(pathExists(report.transcriptPath)).resolves.toBe(true);
       await expect(pathExists(report.structurePath)).resolves.toBe(true);
       await expect(pathExists(report.wordExportPath)).resolves.toBe(true);
-      await expect(pathExists(report.htmlMapExportPath)).resolves.toBe(true);
+      await expect(pathExists(report.htmlMapExportPath)).resolves.toBe(false);
 
       const metadata = JSON.parse(
         await readFile(join(dataDir, "manual-smoke", "metadata.json"), "utf8")

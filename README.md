@@ -91,13 +91,15 @@ Build output is written to `dist/` and `dist-electron/`.
 
 ## Windows Packaging
 
-The MVP uses `electron-builder` for Windows packaging. Create an unpacked Windows desktop build:
+The MVP uses `electron-builder` for Windows packaging. Create the x64 Windows installer and portable executable:
 
 ```powershell
 pnpm package:win
 ```
 
-The packaged app is written to `out/win-unpacked/`. The current MVP packaging target is deliberately unpacked so the Windows build can be smoke-tested without installer signing or update infrastructure.
+Release artifacts are written to `out/`, including an NSIS installer and a portable executable. The installer creates Start menu and desktop shortcuts. To create only an unpacked smoke-test build, run `pnpm package:win:dir`; it is written to `out/win-unpacked/`.
+
+The current MVP artifacts are unsigned. Windows may show a SmartScreen warning until a code-signing certificate is configured.
 
 ## Windows Audio POC Smoke Test
 

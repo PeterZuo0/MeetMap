@@ -11,6 +11,8 @@ import { createDemoAudioCaptureProvider } from "./ipc/demoAudioCaptureProvider.j
 import { createWindowsAudioCaptureProvider } from "./ipc/windowsAudioCaptureProvider.js";
 import type { RecordingIpcContext } from "./ipc/recordingIpc.js";
 import type { MeetingIpcContext } from "./ipc/meetingIpc.js";
+import type { MeetingStructureClient } from "../src/features/intelligence/meetingStructureClient.js";
+import type { TranscriptionClient } from "../src/features/transcription/transcriptionClient.js";
 
 export type MainRuntimeConfigInput = {
   env: NodeJS.ProcessEnv;
@@ -18,6 +20,7 @@ export type MainRuntimeConfigInput = {
   appPath?: string;
   resourcesPath?: string;
   isPackaged?: boolean;
+  structureClient?: MeetingStructureClient;
 };
 
 export type MainRuntimeConfig = {
@@ -34,7 +37,8 @@ export function resolveMainRuntimeConfig({
   argv,
   appPath = process.cwd(),
   resourcesPath = process.cwd(),
-  isPackaged = false
+  isPackaged = false,
+  structureClient
 }: MainRuntimeConfigInput): MainRuntimeConfig {
   const demoMode =
     env.MEETMAP_DEMO_MODE === "1" || argv.includes("--meetmap-demo");
@@ -68,7 +72,7 @@ export function resolveMainRuntimeConfig({
                 model: providerConfig.transcription.model,
                 requestTranscription: requesters.requestTranscription
               }),
-              structureClient: createOpenAiMeetingStructureClient({
+              structureClient: structureClient ?? createOpenAiMeetingStructureClient({
                 apiKey: providerConfig.structure.apiKey,
                 model: providerConfig.structure.model,
                 requestStructure: requesters.requestStructure
@@ -78,6 +82,21 @@ export function resolveMainRuntimeConfig({
           recordingIpc: productionRecordingIpc
         };
       }
+    }
+
+    if (structureClient) {
+      return {
+        demoMode: false,
+        meetingIpc: {
+          workflowMode: "production",
+          workflowServices: createProductionWorkflowServices({
+            diarizationClient: createTrackDiarizationClient(),
+            transcriptionClient: createUnavailableTranscriptionClient(),
+            structureClient
+          })
+        },
+        recordingIpc: productionRecordingIpc
+      };
     }
 
     return {
@@ -134,6 +153,14 @@ export function resolveNativeAudioHelperPath({
   return fileExists(developmentPublishedHelperPath)
     ? developmentPublishedHelperPath
     : path.join(nativeRoot, "windows-audio", "src", "MeetMap.WindowsAudio.csproj");
+}
+
+function createUnavailableTranscriptionClient(): TranscriptionClient {
+  return {
+    async transcribeChunk() {
+      throw new Error("音频转写尚未配置。请通过环境变量配置转写服务后再处理音频。");
+    }
+  };
 }
 
 function shouldConfigureCloudWorkflow(env: NodeJS.ProcessEnv): boolean {
