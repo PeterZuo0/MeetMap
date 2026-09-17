@@ -8,6 +8,8 @@ import type {
   AudioCaptureUnsubscribe
 } from "../../src/features/recording/audioCaptureProvider.js";
 
+const DEMO_LEVEL_INTERVAL_MS = 60;
+
 export function createDemoAudioCaptureProvider(): AudioCaptureProvider {
   let request: AudioCaptureStartRequest | undefined;
   let levelTimer: NodeJS.Timeout | undefined;
@@ -106,15 +108,24 @@ export function createDemoAudioCaptureProvider(): AudioCaptureProvider {
       return;
     }
 
+    let tick = 0;
     levelTimer = setInterval(() => {
       const occurredAt = new Date().toISOString();
+      tick += 1;
       if (request?.tracks.system) {
-        emitLevel(levelSubscribers, { track: "system", level: 0.62, occurredAt });
+        const level = demoLevel(tick, 0.42, 1);
+        emitLevel(levelSubscribers, { track: "system", level, peak: demoPeak(level), occurredAt });
       }
       if (request?.tracks.microphone) {
-        emitLevel(levelSubscribers, { track: "microphone", level: 0.34, occurredAt });
+        const level = demoLevel(tick, 0.28, 2);
+        emitLevel(levelSubscribers, {
+          track: "microphone",
+          level,
+          peak: demoPeak(level),
+          occurredAt
+        });
       }
-    }, 500);
+    }, DEMO_LEVEL_INTERVAL_MS);
   }
 
   function stopLevelTimer(): void {
@@ -125,6 +136,16 @@ export function createDemoAudioCaptureProvider(): AudioCaptureProvider {
     clearInterval(levelTimer);
     levelTimer = undefined;
   }
+}
+
+function demoLevel(tick: number, base: number, seed: number): number {
+  const speech = Math.abs(Math.sin((tick + seed * 7) / 9)) * Math.abs(Math.cos(tick / 31));
+  const flutter = ((tick * (17 + seed)) % 11) / 40;
+  return Math.max(0, Math.min(1, base * (0.35 + speech * 1.5) + flutter * 0.3));
+}
+
+function demoPeak(level: number): number {
+  return Math.min(1, level * 1.25 + 0.04);
 }
 
 function emitLevel(

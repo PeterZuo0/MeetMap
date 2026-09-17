@@ -1,4 +1,3 @@
-import { Document, HeadingLevel, Packer, Paragraph } from "docx";
 import type { MeetingStructure } from "../../intelligence/meetingStructure.js";
 import { resolveExportOptions, type ExportOptions } from "../exportOptions.js";
 
@@ -11,6 +10,9 @@ export async function createWordSummaryDocx(
   structure: MeetingStructure,
   options?: ExportOptions
 ): Promise<Uint8Array> {
+  // The homepage and transcription workflow do not need the DOCX runtime.
+  // ESM caches this import after the first export.
+  const { Document, HeadingLevel, Packer, Paragraph } = await import("docx");
   const document = new Document({
     title: structure.metadata.title,
     creator: "MeetMap",

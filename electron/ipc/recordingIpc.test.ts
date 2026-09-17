@@ -600,3 +600,103 @@ test("replaces an active audio probe when setup starts a new probe", async () =>
     await rm(baseDirectory, { force: true, recursive: true });
   }
 });
+
+test("shares concurrent device enumeration but refreshes on the next request", async () => {
+  let finish!: () => void;
+  const listDevices = vi.fn(() => new Promise<[]>((resolve) => { finish = () => resolve([]); }));
+  registerRecordingIpc({
+    store: createMeetingStore("unused"),
+    createAudioCaptureProvider: () => ({ ...createSuccessfulStopProvider(), listDevices })
+  });
+  const first = getHandler("recording:list-devices")(null);
+  const second = getHandler("recording:list-devices")(null);
+  expect(listDevices).toHaveBeenCalledTimes(1);
+  finish();
+  await Promise.all([first, second]);
+  const next = getHandler("recording:list-devices")(null);
+  expect(listDevices).toHaveBeenCalledTimes(2);
+  finish();
+  await next;
+});
+
+test("orders stop and replacement behind a pending probe start", async () => {
+  const events: string[] = [];
+  let releaseStart!: () => void;
+  let count = 0;
+  registerRecordingIpc({
+    store: createMeetingStore("unused"),
+    createAudioCaptureProvider: () => {
+      const id = ++count;
+      return {
+        ...createSuccessfulStopProvider(),
+        async start() {
+          events.push(`start-${id}`);
+          if (id === 1) await new Promise<void>((resolve) => { releaseStart = resolve; });
+        },
+        async stop() { events.push(`stop-${id}`); return { tracks: {} }; }
+      };
+    }
+  });
+  const first = getHandler("recording:probe-start")(createIpcEvent().event);
+  await vi.waitFor(() => expect(events).toEqual(["start-1"]));
+  const stop = getHandler("recording:probe-stop")(null);
+  const second = getHandler("recording:probe-start")(createIpcEvent().event);
+  expect(events).toEqual(["start-1"]);
+  releaseStart();
+  await Promise.all([first, stop, second]);
+  expect(events).toEqual(["start-1", "stop-1", "start-2"]);
+  await getHandler("recording:probe-stop")(null);
+  expect(events).toEqual(["start-1", "stop-1", "start-2", "stop-2"]);
+});
+
+test("shutdown waits for a starting probe and ignores late levels after window destruction", async () => {
+  const requests: AudioCaptureStartRequest[] = [];
+  const callbacks: Array<(update: AudioLevelUpdate) => void> = [];
+  const stops: string[] = [];
+  let release!: () => void;
+  const controller = registerRecordingIpc({
+    store: createMeetingStore("unused"),
+    createAudioCaptureProvider: () => ({
+      ...createLevelCapturingProvider(requests, callbacks, stops),
+      async start(request) {
+        requests.push(request);
+        await new Promise<void>((resolve) => { release = resolve; });
+      }
+    })
+  });
+  const send = vi.fn(() => { throw new TypeError("Object has been destroyed"); });
+  let destroyed = false;
+  const start = getHandler("recording:probe-start")({ sender: { send, isDestroyed: () => destroyed } });
+  await vi.waitFor(() => expect(requests).toHaveLength(1));
+  destroyed = true;
+  const level: AudioLevelUpdate = { track: "system", level: 0.4, occurredAt: new Date().toISOString() };
+  expect(() => callbacks[0](level)).not.toThrow();
+  const shutdown = controller.shutdown();
+  expect(controller.shutdown()).toBe(shutdown);
+  expect(stops).toEqual([]);
+  release();
+  await start;
+  await shutdown;
+  expect(stops).toEqual(["stop", "unsubscribe-level"]);
+  expect(() => callbacks[0](level)).not.toThrow();
+  expect(send).not.toHaveBeenCalled();
+  await expect(getHandler("recording:probe-start")({ sender: { send } })).rejects.toThrow("Application is closing");
+});
+
+test("shutdown stops an active recording and persists its local audio metadata", async () => {
+  const baseDirectory = await mkdtemp(join(tmpdir(), "meetmap-exit-test-"));
+  try {
+    const store = createMeetingStore(baseDirectory);
+    const meeting = await store.createMeeting({ id: "exit-recording", title: "Exit", outputLanguage: "en" });
+    const controller = registerRecordingIpc({ store, createAudioCaptureProvider: createSuccessfulStopProvider });
+    await getHandler("recording:start")(createIpcEvent().event, meeting.id as never);
+    await controller.shutdown();
+    const saved = await store.readMetadata(meeting.id);
+    expect(saved.status).toBe("recorded");
+    expect(saved.audioTracks.system?.filePath).toContain("system.wav");
+    expect(saved.audioTracks.microphone?.filePath).toContain("microphone.wav");
+    expect(saved.timestamps.recordingEndedAt).toBeDefined();
+  } finally {
+    await rm(baseDirectory, { force: true, recursive: true });
+  }
+});

@@ -7,6 +7,7 @@ import type { LanguageOptionValue } from "../features/settings/languageOptions";
 import { LANGUAGE_OPTIONS } from "../features/settings/languageOptions";
 import type { ProcessingPreferences } from "../features/settings/processingPreferences";
 import { DEFAULT_APP_SETTINGS } from "../features/settings/appSettings";
+import { buildModelOptions } from "../features/providers/llmModelCatalog";
 import type {
   LlmProviderState,
   SaveLlmProviderInput
@@ -16,12 +17,19 @@ import type {
   MeetingDetailData,
   ProcessingProgressUpdate,
   RecordingAudioDevice,
-  RecordingAudioLevel,
   RecordingAudioSources,
   SettingsRuntimeStatus,
   WorkspaceState
 } from "./meetMapApi";
+import type { LiveLevelStream } from "../features/recording/liveLevelStream";
+import { createLiveLevelStream } from "../features/recording/liveLevelStream";
+import { LiveWaveform } from "./ui/LiveWaveform";
+import { BusyIndicator } from "./ui/BusyIndicator";
+import { usePageMotion } from "./ui/usePageMotion";
+import { formatError } from "./errorMessage";
 import "./ui/transcriptionApp.css";
+import "./ui/motion.css";
+import "./ui/recordingWidget.css";
 
 type AppView =
   | "home"
@@ -29,27 +37,38 @@ type AppView =
   | "recording"
   | "import"
   | "processing"
-  | "settings"
   | "transcript";
 
 type AudioTrack = "system" | "microphone";
+
+/** Minimum gap between preflight meter re-renders, per track. */
+const PREFLIGHT_LEVEL_INTERVAL_MS = 100;
 type ProcessingMode = "transcription" | "analysis";
 
 export function App() {
   const api = window.meetMap;
   const [view, setView] = useState<AppView>("home");
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [audioExportPath, setAudioExportPath] = useState<string | null>(null);
   const [workspace, setWorkspace] = useState<WorkspaceState | null>(null);
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_APP_SETTINGS);
   const [runtimeStatus, setRuntimeStatus] = useState<SettingsRuntimeStatus | null>(null);
   const [meetings, setMeetings] = useState<MeetingMetadata[]>([]);
   const [meeting, setMeeting] = useState<MeetingMetadata | null>(null);
+  const [recordingMeeting, setRecordingMeeting] = useState<MeetingMetadata | null>(null);
+  const [analysisIds, setAnalysisIds] = useState<string[]>([]);
+  const selectedMeetingRef = useRef<string | undefined>(undefined);
+  selectedMeetingRef.current = meeting?.id;
   const [detail, setDetail] = useState<MeetingDetailData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const motionRoot = useRef<HTMLElement>(null);
+  usePageMotion(motionRoot, `${isLoading ? "loading" : view}${isSettingsOpen ? ":settings" : ""}`);
   const [isChoosingWorkspace, setIsChoosingWorkspace] = useState(false);
   const [isStarting, setIsStarting] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [isStopping, setIsStopping] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
+  const recordingElapsed = useRecordingTimer(recordingMeeting, isPaused);
   const [isPauseChanging, setIsPauseChanging] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [title, setTitle] = useState("未命名会议");
@@ -59,9 +78,10 @@ export function App() {
     microphone: true
   });
   const [audioDevices, setAudioDevices] = useState<RecordingAudioDevice[]>([]);
+  const [isLoadingDevices, setIsLoadingDevices] = useState(false);
   const [selectedDeviceIds, setSelectedDeviceIds] = useState<Partial<Record<AudioTrack, string>>>({});
   const [preflightLevels, setPreflightLevels] = useState<Partial<Record<AudioTrack, AudioPreflightLevelSample[]>>>({});
-  const [recordingLevels, setRecordingLevels] = useState<Partial<Record<AudioTrack, RecordingAudioLevel[]>>>({});
+  const liveLevels = useRef(createLiveLevelStream()).current;
   const [unavailableTracks, setUnavailableTracks] = useState<Partial<Record<AudioTrack, string>>>({});
   const [preflightNow, setPreflightNow] = useState(() => new Date().toISOString());
   const [processingProgress, setProcessingProgress] = useState<ProcessingProgressUpdate | null>(null);
@@ -69,25 +89,15 @@ export function App() {
   const [meetingOrigin, setMeetingOrigin] = useState<"import" | "recording" | null>(null);
   const probeActiveRef = useRef(false);
   const activeViewRef = useRef<AppView>(view);
-  const settingsReturnViewRef = useRef<AppView>("home");
 
   useEffect(() => {
     activeViewRef.current = view;
   }, [view]);
 
   useEffect(() => {
-    return api?.onOpenSettings?.(() => {
-      const currentView = activeViewRef.current;
-      if (currentView === "recording" || currentView === "processing") {
-        setError("录音或处理期间暂时不能打开设置。");
-        return;
-      }
-
-      settingsReturnViewRef.current = currentView === "settings" ? "home" : currentView;
-      setError(null);
-      activeViewRef.current = "settings";
-      setView("settings");
-    });
+    // Settings open over whatever is on screen, recording included: a missing
+    // transcription key is usually discovered mid-session.
+    return api?.onOpenSettings?.(() => setIsSettingsOpen(true));
   }, [api]);
 
   const refreshMeetings = useCallback(async () => {
@@ -153,15 +163,17 @@ export function App() {
       }
 
       setAudioDevices(devices);
-      setSelectedDeviceIds((current) => ({
-        system: current.system ?? devices.find((device) => device.track === "system")?.id,
-        microphone: current.microphone ?? devices.find((device) => device.track === "microphone")?.id
-      }));
+      setSelectedDeviceIds((current) => {
+        const select = (track: AudioTrack) => devices.some((device) => device.track === track && device.id === current[track])
+          ? current[track] : devices.find((device) => device.track === track)?.id;
+        const next = { system: select("system"), microphone: select("microphone") };
+        return next.system === current.system && next.microphone === current.microphone ? current : next;
+      });
     }).catch((caughtError) => {
       if (!cancelled) {
         setError(formatError(caughtError));
       }
-    });
+    }).finally(() => { if (!cancelled) setIsLoadingDevices(false); });
 
     return () => {
       cancelled = true;
@@ -173,14 +185,23 @@ export function App() {
       return;
     }
 
+    const lastPreflightAt: Partial<Record<AudioTrack, number>> = {};
     return api.onAudioLevel((update) => {
-      if (update.source === "preflight") {
-        setPreflightLevels((current) => appendLevel(current, update));
-      } else {
-        setRecordingLevels((current) => appendLevel(current, update));
+      if (update.source !== "preflight") {
+        liveLevels.push(update.track, { level: update.level, peak: update.peak ?? update.level });
+        return;
       }
+
+      // Levels arrive fast enough to drive a waveform; the setup meters do not
+      // need a re-render per sample.
+      const receivedAt = Date.now();
+      if (receivedAt - (lastPreflightAt[update.track] ?? 0) < PREFLIGHT_LEVEL_INTERVAL_MS) {
+        return;
+      }
+      lastPreflightAt[update.track] = receivedAt;
+      setPreflightLevels((current) => appendLevel(current, update));
     });
-  }, [api]);
+  }, [api, liveLevels]);
 
   useEffect(() => {
     if (!api?.onProcessingProgress) {
@@ -204,37 +225,38 @@ export function App() {
   }, [view]);
 
   useEffect(() => {
-    if (view !== "live-setup" || !api?.startAudioProbe) {
+    if (view !== "live-setup" || isLoadingDevices || isStarting || !api?.startAudioProbe || (!audioSources.system && !audioSources.microphone)) {
       return;
     }
 
     let cancelled = false;
-    void api.startAudioProbe({ audioSources, deviceIds: selectedDeviceIds }).then(() => {
-      if (cancelled) {
-        void api.stopAudioProbe?.();
-        return;
-      }
-      probeActiveRef.current = true;
-    }).catch((caughtError) => {
-      if (cancelled) {
-        return;
-      }
-      const message = formatError(caughtError);
-      setUnavailableTracks({
-        system: audioSources.system ? message : undefined,
-        microphone: audioSources.microphone ? message : undefined
+    let requested = false;
+    const startProbe = api.startAudioProbe;
+    const timer = window.setTimeout(() => {
+      requested = true;
+      void startProbe({ audioSources, deviceIds: selectedDeviceIds }).then(() => {
+        if (cancelled) return;
+        probeActiveRef.current = true;
+      }).catch((caughtError) => {
+        if (cancelled) return;
+        const message = formatError(caughtError);
+        setUnavailableTracks({
+          system: audioSources.system ? message : undefined,
+          microphone: audioSources.microphone ? message : undefined
+        });
+        setError(message);
       });
-      setError(message);
-    });
+    }, 120);
 
     return () => {
       cancelled = true;
-      if (probeActiveRef.current) {
+      window.clearTimeout(timer);
+      if (requested) {
         probeActiveRef.current = false;
-        void api.stopAudioProbe?.();
+        void api.stopAudioProbe?.().catch(() => undefined);
       }
     };
-  }, [api, audioSources, selectedDeviceIds, view]);
+  }, [api, audioSources, selectedDeviceIds, view, isLoadingDevices, isStarting]);
 
   useEffect(() => {
     if (view !== "transcript" || !meeting?.id || !api?.getMeetingDetailData) {
@@ -267,6 +289,10 @@ export function App() {
   }), [api?.startAudioProbe, audioSources, preflightLevels, preflightNow, unavailableTracks]);
 
   async function chooseWorkspace() {
+    if (recordingMeeting || analysisIds.length) {
+      setError("请等待录音或分析结束后再切换保存位置。");
+      return;
+    }
     if (!api?.chooseWorkspaceFolder) {
       setError("当前运行环境无法选择保存位置。");
       return;
@@ -296,6 +322,10 @@ export function App() {
   }
 
   function openLiveSetup() {
+    if (recordingMeeting) {
+      setView("recording");
+      return;
+    }
     if (!workspace?.currentPath) {
       setError("请先选择文件保存位置。");
       return;
@@ -305,6 +335,7 @@ export function App() {
     setAudioSources({ system: true, microphone: true });
     setPreflightLevels({});
     setUnavailableTracks({});
+    setIsLoadingDevices(Boolean(api?.listAudioDevices));
     setView("live-setup");
   }
 
@@ -317,10 +348,8 @@ export function App() {
     setIsStarting(true);
     setError(null);
     try {
-      if (probeActiveRef.current) {
-        probeActiveRef.current = false;
-        await api.stopAudioProbe?.();
-      }
+      probeActiveRef.current = false;
+      await api.stopAudioProbe?.();
       const created = await api.createMeeting({
         title: title.trim() || "未命名会议",
         outputLanguage,
@@ -331,8 +360,9 @@ export function App() {
         deviceIds: selectedDeviceIds
       });
       setMeeting(recording);
+      setRecordingMeeting(recording);
       setMeetingOrigin("recording");
-      setRecordingLevels({});
+      liveLevels.reset();
       setIsPaused(false);
       setView("recording");
     } catch (caughtError) {
@@ -372,8 +402,12 @@ export function App() {
     setError(null);
     try {
       const recorded = await api.stopRecording();
+      setRecordingMeeting(null);
       setMeeting(recorded);
       setIsPaused(false);
+      // List the finished recording before transcription runs, so a failure
+      // downstream still leaves a visible project in the library.
+      await refreshMeetings().catch(() => undefined);
       await processMeeting(recorded);
     } catch (caughtError) {
       setError(formatError(caughtError));
@@ -382,32 +416,19 @@ export function App() {
     }
   }
 
-  async function leaveRecording(destination: "home" | "live-setup") {
-    if (!api || isStopping) {
+  async function saveMeetingAudio(target: MeetingMetadata) {
+    if (!api?.saveMeetingAudio) {
+      setError("当前运行环境无法导出音频。");
       return;
     }
 
-    const shouldLeave = window.confirm("离开录音页面会结束当前录音并保存音频，但不会自动开始转写。是否继续？");
-    if (!shouldLeave) {
-      return;
-    }
-
-    setIsStopping(true);
-    setError(null);
     try {
-      const recorded = await api.stopRecording();
-      setMeeting(recorded);
-      setIsPaused(false);
-      if (destination === "home") {
-        returnHome();
-      } else {
-        activeViewRef.current = "live-setup";
-        setView("live-setup");
+      const savedPath = await api.saveMeetingAudio(target.id);
+      if (savedPath) {
+        setAudioExportPath(savedPath);
       }
     } catch (caughtError) {
       setError(formatError(caughtError));
-    } finally {
-      setIsStopping(false);
     }
   }
 
@@ -474,6 +495,10 @@ export function App() {
     setError(null);
     try {
       const processed = await api.processMeeting(target.id, buildProcessingPreferences(settings));
+      if (selectedMeetingRef.current !== target.id) {
+        await refreshMeetings();
+        return;
+      }
       setMeeting(processed);
       setDetail(null);
       await refreshMeetings();
@@ -485,6 +510,9 @@ export function App() {
       }
     } catch (caughtError) {
       setError(formatError(caughtError));
+      // The audio is already on disk; refresh so the failed recording shows up
+      // in the library and can be retried instead of looking lost.
+      await refreshMeetings().catch(() => undefined);
     }
   }
 
@@ -494,27 +522,21 @@ export function App() {
       return;
     }
 
-    activeViewRef.current = "processing";
-    setProcessingMode("analysis");
-    setView("processing");
-    setProcessingProgress(createInitialProgress(target.id, "analysis"));
+    if (analysisIds.includes(target.id)) return;
+    setAnalysisIds((ids) => [...ids, target.id]);
     setError(null);
     try {
-      const analyzed = await api.analyzeMeeting(
-        target.id,
-        buildProcessingPreferences(settings, false)
-      );
-      setMeeting(analyzed);
-      setDetail(null);
-      await refreshMeetings();
-      if (activeViewRef.current === "processing") {
-        activeViewRef.current = "transcript";
-        setView("transcript");
-      } else if (activeViewRef.current === "transcript" && api.getMeetingDetailData) {
-        setDetail(await api.getMeetingDetailData(target.id));
+      const analyzed = await api.analyzeMeeting(target.id, buildProcessingPreferences(settings, false));
+      const nextDetail = await api.getMeetingDetailData?.(target.id);
+      if (selectedMeetingRef.current === target.id) {
+        setMeeting(analyzed);
+        if (nextDetail) setDetail(nextDetail);
       }
+      await refreshMeetings();
     } catch (caughtError) {
-      setError(formatError(caughtError));
+      if (selectedMeetingRef.current === target.id) setError(formatError(caughtError));
+    } finally {
+      setAnalysisIds((ids) => ids.filter((id) => id !== target.id));
     }
   }
 
@@ -541,6 +563,9 @@ export function App() {
   }
 
   async function deleteMeetingRecord(target: MeetingMetadata) {
+    if (target.id === recordingMeeting?.id || analysisIds.includes(target.id)) {
+      throw new Error("请等待此会议的录音或分析结束后再删除。");
+    }
     if (!api?.deleteMeeting) {
       throw new Error("当前运行环境无法删除会议记录。");
     }
@@ -584,15 +609,6 @@ export function App() {
     setView("home");
   }
 
-  function closeSettings() {
-    setError(null);
-    const destination = settingsReturnViewRef.current === "settings"
-      ? "home"
-      : settingsReturnViewRef.current;
-    activeViewRef.current = destination;
-    setView(destination);
-  }
-
   function returnToPreviousPage() {
     setError(null);
     setDetail(null);
@@ -609,12 +625,31 @@ export function App() {
     setView("transcript");
   }
 
+  useEffect(() => {
+    api?.updateRecordingWidget?.(recordingMeeting ? {
+      title: recordingMeeting.title,
+      elapsed: formatElapsed(recordingElapsed),
+      paused: isPaused,
+      busy: isStopping || isPauseChanging
+    } : null);
+  }, [api, recordingMeeting, recordingElapsed, isPaused, isStopping, isPauseChanging]);
+
+  useEffect(() => {
+    return api?.onRecordingWidgetAction?.((action) => {
+      if (!recordingMeeting) return;
+      if (action === "open") setView("recording");
+      if (isStopping || isPauseChanging) return;
+      if (action === "pause") void changePauseState();
+      if (action === "stop") void stopRecording();
+    });
+  });
+
   if (isLoading) {
     return <LoadingScreen />;
   }
 
   return (
-    <main className="transcription-app">
+    <main className="transcription-app" ref={motionRoot}>
       {view === "home" ? (
         <HomeScreen
           apiReady={Boolean(runtimeStatus?.openAi.configured)}
@@ -632,7 +667,13 @@ export function App() {
           }}
           onLive={openLiveSetup}
           onDeleteMeeting={deleteMeetingRecord}
+          onOpenSettings={() => setIsSettingsOpen(true)}
           onOpenTranscript={openTranscript}
+          onProcessMeeting={(item) => {
+            setMeeting(item);
+            setMeetingOrigin("recording");
+            void processMeeting(item);
+          }}
           onRenameMeeting={renameMeetingRecord}
           onRevealWorkspace={() => void revealWorkspace()}
           workspacePath={workspace?.currentPath ?? null}
@@ -641,6 +682,7 @@ export function App() {
 
       {view === "live-setup" ? (
         <LiveSetupScreen
+          isLoadingDevices={isLoadingDevices}
           audioDevices={audioDevices}
           audioSources={audioSources}
           error={error}
@@ -669,17 +711,18 @@ export function App() {
 
       {view === "recording" ? (
         <RecordingView
-          audioSources={audioSources}
+          elapsed={recordingElapsed}
           error={error}
           isPauseChanging={isPauseChanging}
           isPaused={isPaused}
           isStopping={isStopping}
-          meeting={meeting}
+          meeting={recordingMeeting}
           onPause={() => void changePauseState()}
-          onBack={() => void leaveRecording("live-setup")}
-          onHome={() => void leaveRecording("home")}
+          onBack={returnHome}
+          onHome={returnHome}
+          onOpenSettings={() => setIsSettingsOpen(true)}
           onStop={() => void stopRecording()}
-          recordingLevels={recordingLevels}
+          liveLevels={liveLevels}
         />
       ) : null}
 
@@ -700,27 +743,23 @@ export function App() {
 
       {view === "processing" ? (
         <ProcessingView
+          audioExportPath={audioExportPath}
           error={error}
           meeting={meeting}
           mode={processingMode}
           onBack={processingMode === "analysis" ? returnToTranscript : returnToPreviousPage}
           onHome={returnHome}
+          onOpenSettings={() => setIsSettingsOpen(true)}
           onRetry={() => meeting && void (processingMode === "analysis" ? analyzeMeeting(meeting) : processMeeting(meeting))}
+          onReveal={() => meeting && void api?.revealMeetingFolder?.(meeting.id)}
+          onSaveAudio={() => meeting && void saveMeetingAudio(meeting)}
           progress={processingProgress}
-        />
-      ) : null}
-
-      {view === "settings" ? (
-        <SettingsView
-          onBack={closeSettings}
-          onHome={returnHome}
-          onSave={saveAppSettings}
-          settings={settings}
         />
       ) : null}
 
       {view === "transcript" ? (
         <TranscriptView
+          isAnalyzing={Boolean(meeting && analysisIds.includes(meeting.id))}
           detail={detail}
           error={error}
           meeting={meeting}
@@ -731,18 +770,34 @@ export function App() {
           onReveal={() => meeting && void api?.revealMeetingFolder?.(meeting.id)}
         />
       ) : null}
+
+      {recordingMeeting && view !== "recording" ? (
+        <aside className="recording-dock" aria-label="录音小窗">
+          <span>{isPaused ? "已暂停" : "正在录制"} · {formatElapsed(recordingElapsed)}</span>
+          <strong>{recordingMeeting.title}</strong>
+          <button onClick={() => setView("recording")} type="button">返回录音</button>
+          <button disabled={isPauseChanging || isStopping} onClick={() => void changePauseState()} type="button">{isPaused ? "继续录制" : "暂停"}</button>
+          <button disabled={isPauseChanging || isStopping} onClick={() => void stopRecording()} type="button">{isStopping ? "正在停止..." : "结束并转写"}</button>
+        </aside>
+      ) : null}
+
+      {isSettingsOpen ? (
+        <SettingsDialog
+          onClose={() => setIsSettingsOpen(false)}
+          onSave={saveAppSettings}
+          settings={settings}
+        />
+      ) : null}
     </main>
   );
 }
 
-function SettingsView({
-  onBack,
-  onHome,
+function SettingsDialog({
+  onClose,
   onSave,
   settings
 }: {
-  onBack(): void;
-  onHome(): void;
+  onClose(): void;
   onSave(settings: AppSettings): Promise<AppSettings>;
   settings: AppSettings;
 }) {
@@ -794,12 +849,30 @@ function SettingsView({
   }
 
   return (
-    <div className="app-frame settings-frame">
-      <MinimalHeader label="设置" onBack={onBack} onHome={onHome} />
+    <div
+      className="settings-overlay"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) {
+          onClose();
+        }
+      }}
+    >
+      <div
+        aria-labelledby="settings-dialog-title"
+        aria-modal="true"
+        className="settings-dialog"
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            onClose();
+          }
+        }}
+        role="dialog"
+      >
       <header className="settings-head">
         <p className="eyebrow">EDIT / SETTINGS</p>
-        <h1>偏好与模型连接</h1>
-        <p>这些设置保存在本地。术语和总结偏好只会在你主动开始 LLM 分析时发送。</p>
+        <h1 id="settings-dialog-title">偏好与模型连接</h1>
+        <p>这些设置保存在本地。术语和总结偏好只会在你主动开始 LLM 分析时发送。录音过程中也可以随时修改。</p>
+        <button aria-label="关闭设置" autoFocus className="settings-close" onClick={onClose} type="button">关闭</button>
       </header>
 
       <form className="settings-form" onSubmit={(event) => {
@@ -918,19 +991,38 @@ function SettingsView({
             {formError ? <span className="settings-error">{formError}</span> : null}
             {!formError && saveMessage ? <span className="settings-saved">{saveMessage}</span> : null}
           </div>
-          <button className="settings-save" disabled={isSaving} type="submit">
-            {isSaving ? "正在保存" : "保存设置"}
-          </button>
+          <div className="settings-footer-actions">
+            <button onClick={onClose} type="button">关闭</button>
+            <button className="settings-save" disabled={isSaving} type="submit">
+              {isSaving ? <><BusyIndicator />正在保存</> : "保存设置"}
+            </button>
+          </div>
         </footer>
       </form>
+      </div>
     </div>
   );
 }
+
+const CUSTOM_MODEL_OPTION = "__custom__";
+
+/** Seeds the dropdown before the provider has been asked for its real list. */
+const PRESET_MODELS: Record<string, string[]> = {
+  "https://api.openai.com/v1": ["gpt-4.1-mini", "gpt-4.1", "gpt-4o-mini", "gpt-4o"],
+  "http://localhost:11434/v1": ["qwen3:8b", "llama3.1:8b"],
+  "http://localhost:1234/v1": ["local-model"]
+};
+
+/** Speech-to-text is a separate model; local runtimes usually offer none. */
+const PRESET_TRANSCRIPTION_MODELS: Record<string, string[]> = {
+  "https://api.openai.com/v1": ["gpt-4o-mini-transcribe", "gpt-4o-transcribe", "whisper-1"]
+};
 
 const EMPTY_PROVIDER_DRAFT: SaveLlmProviderInput = {
   name: "",
   baseUrl: "https://api.openai.com/v1",
   model: "gpt-4.1-mini",
+  transcriptionModel: "gpt-4o-mini-transcribe",
   apiStyle: "responses",
   apiKeyRequired: true,
   apiKey: ""
@@ -945,9 +1037,24 @@ function LlmProviderSettings() {
   const [draft, setDraft] = useState<SaveLlmProviderInput>(EMPTY_PROVIDER_DRAFT);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
+  const [message, setMessage] = useState<{ text: string; tone: "success" | "note" } | null>(null);
   const [providerError, setProviderError] = useState<string | null>(null);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  const [models, setModels] = useState<string[]>([]);
+  const [isLoadingModels, setIsLoadingModels] = useState(false);
+  const [isCustomModel, setIsCustomModel] = useState(false);
+  const [isCustomTranscriptionModel, setIsCustomTranscriptionModel] = useState(false);
+  const normalizedBaseUrl = draft.baseUrl.trim().replace(/\/+$/, "");
+  const modelOptions = buildModelOptions({
+    current: draft.model,
+    fallback: PRESET_MODELS[normalizedBaseUrl] ?? [],
+    fetched: models
+  });
+  const transcriptionModelOptions = buildModelOptions({
+    current: draft.transcriptionModel ?? "",
+    fallback: PRESET_TRANSCRIPTION_MODELS[normalizedBaseUrl] ?? [],
+    fetched: models
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -969,22 +1076,83 @@ function LlmProviderSettings() {
     };
   }, [api]);
 
+  async function loadModels(
+    source: Pick<SaveLlmProviderInput, "baseUrl" | "apiKey" | "id"> = draft,
+    { automatic = false }: { automatic?: boolean } = {}
+  ) {
+    if (!api?.listLlmModels) {
+      setProviderError("当前运行环境无法读取模型列表。");
+      return;
+    }
+
+    setIsLoadingModels(true);
+    setProviderError(null);
+    setMessage(null);
+    try {
+      const available = await api.listLlmModels({
+        baseUrl: source.baseUrl,
+        apiKey: source.apiKey || undefined,
+        providerId: source.id
+      });
+      setModels(available);
+      setIsCustomModel(false);
+      setMessage({
+        tone: available.length > 0 ? "success" : "note",
+        text: available.length > 0
+          ? `读取到 ${available.length} 个可用模型。`
+          : "该服务没有返回任何模型。"
+      });
+      setDraft((current) => available.length > 0 && !available.includes(current.model)
+        ? { ...current, model: available[0] }
+        : current);
+    } catch (caughtError) {
+      // An automatic attempt runs without the user asking, so a service that is
+      // offline or still missing its key stays a note, not a red failure.
+      if (automatic) {
+        setMessage({
+          tone: "note",
+          text: `未能自动获取模型列表：${formatError(caughtError).replace(/[。.]\s*$/, "")}。可以手动填写模型 ID。`
+        });
+      } else {
+        setProviderError(formatError(caughtError));
+      }
+    } finally {
+      setIsLoadingModels(false);
+    }
+  }
+
+  /** Only worth trying when the endpoint can actually authenticate us. */
+  function canLoadModels(source: SaveLlmProviderInput): boolean {
+    return Boolean(source.baseUrl.trim())
+      && (!source.apiKeyRequired || Boolean(source.apiKey?.trim()) || Boolean(source.id));
+  }
+
   function startEdit(providerId: string) {
     const provider = state.providers.find((item) => item.id === providerId);
     if (!provider) {
       return;
     }
-    setDraft({
+    setModels([]);
+    setIsCustomModel(false);
+    setIsCustomTranscriptionModel(false);
+    const next: SaveLlmProviderInput = {
       id: provider.id,
       name: provider.name,
       baseUrl: provider.baseUrl,
       model: provider.model,
+      transcriptionModel: provider.transcriptionModel,
       apiStyle: provider.apiStyle,
       apiKeyRequired: provider.apiKeyRequired,
       apiKey: ""
-    });
+    };
+    setDraft(next);
     setMessage(null);
     setProviderError(null);
+    // The saved key lives in the main process, so an existing provider can
+    // refresh its models without the user retyping anything.
+    if (canLoadModels(next)) {
+      void loadModels(next, { automatic: true });
+    }
   }
 
   function applyPreset(preset: "openai" | "ollama" | "lmstudio") {
@@ -994,6 +1162,7 @@ function LlmProviderSettings() {
         name: "Ollama（本地）",
         baseUrl: "http://localhost:11434/v1",
         model: "qwen3:8b",
+        transcriptionModel: "",
         apiStyle: "chat_completions",
         apiKeyRequired: false,
         apiKey: ""
@@ -1002,14 +1171,23 @@ function LlmProviderSettings() {
         name: "LM Studio（本地）",
         baseUrl: "http://localhost:1234/v1",
         model: "local-model",
+        transcriptionModel: "",
         apiStyle: "chat_completions",
         apiKeyRequired: false,
         apiKey: ""
       }
     };
-    setDraft({ ...values[preset] });
+    const next = { ...values[preset] };
+    setDraft(next);
+    setModels([]);
+    setIsCustomModel(false);
+    setIsCustomTranscriptionModel(false);
     setMessage(null);
     setProviderError(null);
+    // Local services need no key, so their model list can be filled in right away.
+    if (canLoadModels(next)) {
+      void loadModels(next, { automatic: true });
+    }
   }
 
   async function saveProvider() {
@@ -1024,7 +1202,10 @@ function LlmProviderSettings() {
       const nextState = await api.saveLlmProvider(draft);
       setState(nextState);
       setDraft(EMPTY_PROVIDER_DRAFT);
-      setMessage("LLM 提供商已保存；密钥不会显示在界面中。");
+      setModels([]);
+      setIsCustomModel(false);
+      setIsCustomTranscriptionModel(false);
+      setMessage({ tone: "success", text: "LLM 提供商已保存；密钥不会显示在界面中。" });
     } catch (caughtError) {
       setProviderError(formatError(caughtError));
     } finally {
@@ -1038,7 +1219,7 @@ function LlmProviderSettings() {
     }
     try {
       setState(await api.setActiveLlmProvider(providerId));
-      setMessage("已切换会议分析模型，下一次分析立即生效。");
+      setMessage({ tone: "success", text: "已切换会议分析模型，下一次分析立即生效。" });
       setProviderError(null);
     } catch (caughtError) {
       setProviderError(formatError(caughtError));
@@ -1059,7 +1240,7 @@ function LlmProviderSettings() {
         setDraft(EMPTY_PROVIDER_DRAFT);
       }
       setPendingDeleteId(null);
-      setMessage("提供商配置和加密密钥已删除。");
+      setMessage({ tone: "success", text: "提供商配置和加密密钥已删除。" });
       setProviderError(null);
     } catch (caughtError) {
       setProviderError(formatError(caughtError));
@@ -1082,7 +1263,7 @@ function LlmProviderSettings() {
             <strong>已保存</strong>
             <button onClick={() => setDraft(EMPTY_PROVIDER_DRAFT)} type="button">新增</button>
           </div>
-          {isLoading ? <p className="llm-empty">正在读取本地配置…</p> : null}
+          {isLoading ? <p className="llm-empty" role="status"><BusyIndicator />正在读取本地配置…</p> : null}
           {!isLoading && state.providers.length === 0 ? (
             <p className="llm-empty">尚未配置。可以从右侧预设开始。</p>
           ) : null}
@@ -1090,7 +1271,9 @@ function LlmProviderSettings() {
             <article className={provider.id === state.activeProviderId ? "is-active" : ""} key={provider.id}>
               <button className="llm-provider-main" onClick={() => startEdit(provider.id)} type="button">
                 <span>{provider.name}</span>
-                <small>{provider.model}</small>
+                <small>
+                  分析 {provider.model} · 转写 {provider.transcriptionModel || "未选择"}
+                </small>
               </button>
               <div className="llm-provider-actions">
                 {provider.id === state.activeProviderId ? (
@@ -1114,19 +1297,133 @@ function LlmProviderSettings() {
           </div>
           <div className="llm-field-grid">
             <label><span>名称</span><input onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} placeholder="例如：公司 Azure OpenAI" value={draft.name} /></label>
-            <label><span>模型</span><input onChange={(event) => setDraft((current) => ({ ...current, model: event.target.value }))} placeholder="模型 ID" value={draft.model} /></label>
+            <ModelField
+              hint={models.length === 0 && !canLoadModels(draft)
+                ? "填写 API Key 后会自动读取该服务的模型列表。"
+                : null}
+              id="llm-model-field"
+              isCustom={isCustomModel}
+              isRefreshing={isLoadingModels}
+              label="分析模型"
+              onChange={(model) => setDraft((current) => ({ ...current, model }))}
+              onCustomChange={setIsCustomModel}
+              onRefresh={() => void loadModels(draft)}
+              options={modelOptions}
+              refreshDisabled={isLoadingModels || !draft.baseUrl.trim()}
+              value={draft.model}
+            />
+            <ModelField
+              emptyLabel="未选择（该服务不用于转写）"
+              hint="转写会调用该服务的 /audio/transcriptions 接口；Ollama、LM Studio 等本地服务通常不提供该接口。"
+              id="llm-transcription-model-field"
+              isCustom={isCustomTranscriptionModel}
+              label="转写模型"
+              onChange={(transcriptionModel) => setDraft((current) => ({ ...current, transcriptionModel }))}
+              onCustomChange={setIsCustomTranscriptionModel}
+              options={transcriptionModelOptions}
+              value={draft.transcriptionModel ?? ""}
+            />
             <label className="llm-wide"><span>API Base URL</span><input onChange={(event) => setDraft((current) => ({ ...current, baseUrl: event.target.value }))} placeholder="https://api.example.com/v1" value={draft.baseUrl} /></label>
             <label><span>API 类型</span><select onChange={(event) => setDraft((current) => ({ ...current, apiStyle: event.target.value as SaveLlmProviderInput["apiStyle"] }))} value={draft.apiStyle}><option value="responses">Responses API</option><option value="chat_completions">Chat Completions</option></select></label>
-            <label><span>API Key</span><input autoComplete="new-password" onChange={(event) => setDraft((current) => ({ ...current, apiKey: event.target.value }))} placeholder={draft.id ? "留空则保留原密钥" : "sk-…"} type="password" value={draft.apiKey ?? ""} /></label>
+            <label>
+              <span>API Key</span>
+              <input
+                autoComplete="new-password"
+                onBlur={() => {
+                  if (models.length === 0 && draft.apiKey?.trim() && canLoadModels(draft)) {
+                    void loadModels(draft, { automatic: true });
+                  }
+                }}
+                onChange={(event) => setDraft((current) => ({ ...current, apiKey: event.target.value }))}
+                placeholder={draft.id ? "留空则保留原密钥" : "sk-…"}
+                type="password"
+                value={draft.apiKey ?? ""}
+              />
+            </label>
           </div>
           <label className="llm-no-key"><input checked={!draft.apiKeyRequired} onChange={(event) => setDraft((current) => ({ ...current, apiKeyRequired: !event.target.checked }))} type="checkbox" /><span>本地服务，不需要 API Key</span></label>
           <div className="llm-editor-footer">
-            <div aria-live="polite">{providerError ? <span className="settings-error">{providerError}</span> : message ? <span className="settings-saved">{message}</span> : <small>API Key 使用系统安全存储加密，渲染界面不会读取明文。</small>}</div>
+            <div aria-live="polite">{providerError ? <span className="settings-error">{providerError}</span> : message ? <span className={message.tone === "success" ? "settings-saved" : "settings-note"}>{message.text}</span> : <small>API Key 使用系统安全存储加密，渲染界面不会读取明文。</small>}</div>
             <button className="solid-small" disabled={isSaving} onClick={() => void saveProvider()} type="button">{isSaving ? "保存中…" : draft.id ? "更新提供商" : "保存提供商"}</button>
           </div>
         </div>
       </div>
     </section>
+  );
+}
+
+function ModelField({
+  emptyLabel,
+  hint,
+  id,
+  isCustom = false,
+  isRefreshing = false,
+  label,
+  onChange,
+  onCustomChange,
+  onRefresh,
+  options,
+  refreshDisabled = false,
+  value
+}: {
+  emptyLabel?: string;
+  hint?: string | null;
+  id: string;
+  isCustom?: boolean;
+  isRefreshing?: boolean;
+  label: string;
+  onChange(value: string): void;
+  onCustomChange(isCustom: boolean): void;
+  onRefresh?(): void;
+  options: string[];
+  refreshDisabled?: boolean;
+  value: string;
+}) {
+  const showInput = isCustom || (options.length === 0 && !emptyLabel);
+
+  return (
+    <div className="llm-field">
+      <span className="llm-field-label">
+        <label htmlFor={id}>{label}</label>
+        {onRefresh ? (
+          <button
+            className="llm-inline-action"
+            disabled={refreshDisabled}
+            onClick={onRefresh}
+            type="button"
+          >
+            {isRefreshing ? <><BusyIndicator />读取中…</> : "获取模型列表"}
+          </button>
+        ) : null}
+      </span>
+      {showInput ? (
+        <input
+          id={id}
+          onChange={(event) => onChange(event.target.value)}
+          placeholder="模型 ID"
+          value={value}
+        />
+      ) : (
+        <select
+          id={id}
+          onChange={(event) => {
+            if (event.target.value === CUSTOM_MODEL_OPTION) {
+              onCustomChange(true);
+              return;
+            }
+            onChange(event.target.value);
+          }}
+          value={value}
+        >
+          {emptyLabel ? <option value="">{emptyLabel}</option> : null}
+          {options.map((option) => (
+            <option key={option} value={option}>{option}</option>
+          ))}
+          <option value={CUSTOM_MODEL_OPTION}>自定义模型 ID…</option>
+        </select>
+      )}
+      {hint ? <small className="llm-field-hint">{hint}</small> : null}
+    </div>
   );
 }
 
@@ -1139,7 +1436,9 @@ function HomeScreen({
   onImport,
   onLive,
   onDeleteMeeting,
+  onOpenSettings,
   onOpenTranscript,
+  onProcessMeeting,
   onRenameMeeting,
   onRevealWorkspace,
   workspacePath
@@ -1152,7 +1451,9 @@ function HomeScreen({
   onImport(): void;
   onLive(): void;
   onDeleteMeeting(meeting: MeetingMetadata): Promise<void>;
+  onOpenSettings(): void;
   onOpenTranscript(meeting: MeetingMetadata): void;
+  onProcessMeeting(meeting: MeetingMetadata): void;
   onRenameMeeting(meeting: MeetingMetadata, title: string): Promise<void>;
   onRevealWorkspace(): void;
   workspacePath: string | null;
@@ -1201,9 +1502,12 @@ function HomeScreen({
     <div className="app-frame home-frame">
       <header className="home-header">
         <div className="wordmark">MeetMap</div>
-        <div className={`provider-state ${apiReady ? "ready" : ""}`}>
-          <span className="state-dot" />
-          {apiReady ? "转写服务已连接" : "转写服务未配置"}
+        <div className="home-header-actions">
+          <div className={`provider-state ${apiReady ? "ready" : ""}`}>
+            <span className="state-dot" />
+            {apiReady ? "转写服务已连接" : "转写服务未配置"}
+          </div>
+          <button className="ghost-small" onClick={onOpenSettings} type="button">设置</button>
         </div>
       </header>
 
@@ -1286,7 +1590,12 @@ function HomeScreen({
                       <button onClick={() => setEditingId(null)} type="button">取消</button>
                     </>
                   ) : (
-                    <button onClick={() => { setEditingId(item.id); setTitleDraft(item.title); setPendingDeleteId(null); }} type="button">重命名</button>
+                    <>
+                      {!item.transcriptPath && hasRecordedAudio(item) ? (
+                        <button className="solid-small" onClick={() => onProcessMeeting(item)} type="button">转写</button>
+                      ) : null}
+                      <button onClick={() => { setEditingId(item.id); setTitleDraft(item.title); setPendingDeleteId(null); }} type="button">重命名</button>
+                    </>
                   )}
                   <button className={pendingDeleteId === item.id ? "danger-confirm" : ""} onClick={() => void requestDelete(item)} type="button">
                     {pendingDeleteId === item.id ? "确认移到回收站" : "删除"}
@@ -1334,6 +1643,7 @@ function WorkspaceBar({
 }
 
 function LiveSetupScreen({
+  isLoadingDevices,
   audioDevices,
   audioSources,
   error,
@@ -1350,6 +1660,7 @@ function LiveSetupScreen({
   selectedDeviceIds,
   title
 }: {
+  isLoadingDevices: boolean;
   audioDevices: RecordingAudioDevice[];
   audioSources: RecordingAudioSources;
   error: string | null;
@@ -1382,12 +1693,12 @@ function LiveSetupScreen({
           {error ? <InlineError message={error} /> : null}
           <button
             className="primary-action"
-            disabled={isStarting || !preflight.canStart}
+            disabled={isLoadingDevices || isStarting || !preflight.canStart}
             onClick={onStart}
             type="button"
           >
-            <span className="button-record-dot" />
-            {isStarting ? "正在启动录音..." : "开始录制"}
+            {isStarting || isLoadingDevices ? <BusyIndicator /> : <span className="button-record-dot" />}
+            {isLoadingDevices ? "正在识别音频设备..." : isStarting ? "正在启动录音..." : "开始录制"}
           </button>
           {preflight.blockingReason ? <p className="field-error">{preflight.blockingReason}</p> : null}
         </section>
@@ -1479,55 +1790,55 @@ function AudioSourceRow({
 }
 
 function RecordingView({
-  audioSources,
+  elapsed,
   error,
   isPauseChanging,
   isPaused,
   isStopping,
+  liveLevels,
   meeting,
   onBack,
   onHome,
+  onOpenSettings,
   onPause,
-  onStop,
-  recordingLevels
+  onStop
 }: {
-  audioSources: RecordingAudioSources;
+  elapsed: number;
   error: string | null;
   isPauseChanging: boolean;
   isPaused: boolean;
   isStopping: boolean;
+  liveLevels: LiveLevelStream;
   meeting: MeetingMetadata | null;
   onBack(): void;
   onHome(): void;
+  onOpenSettings(): void;
   onPause(): void;
   onStop(): void;
-  recordingLevels: Partial<Record<AudioTrack, RecordingAudioLevel[]>>;
 }) {
-  const elapsed = useRecordingTimer(meeting, isPaused);
 
   return (
     <div className="recording-view">
       <div className="recording-topline">
         <PageNavigation onBack={onBack} onHome={onHome} />
-        <div className="recording-state"><span />{isPaused ? "录制已暂停" : "正在录制"}</div>
+        <div className="recording-topline-end">
+          <button className="ghost-small" onClick={onOpenSettings} type="button">设置</button>
+          <div className="recording-state"><span />{isPaused ? "录制已暂停" : "正在录制"}</div>
+        </div>
       </div>
       <section className="recording-stage">
         <p className="recording-title">{meeting?.title ?? "即时会议"}</p>
         <div className="recording-time">{formatElapsed(elapsed)}</div>
         <p className="recording-save-note">音频正在保存到本地工作区</p>
-        <LiveWaveform
-          microphone={audioSources.microphone ? recordingLevels.microphone ?? [] : []}
-          paused={isPaused}
-          system={audioSources.system ? recordingLevels.system ?? [] : []}
-        />
+        <LiveWaveform paused={isPaused} stream={liveLevels} />
         {error ? <InlineError message={error} /> : null}
         <div className="recording-controls">
           <button disabled={isPauseChanging || isStopping} onClick={onPause} type="button">
             {isPauseChanging ? "处理中..." : isPaused ? "继续录制" : "暂停"}
           </button>
-          <button className="stop-action" disabled={isStopping} onClick={onStop} type="button">
+          <button className="stop-action" disabled={isStopping || isPauseChanging} onClick={onStop} type="button">
             <span />
-            {isStopping ? "正在停止..." : "结束并转写"}
+            {isStopping ? <><BusyIndicator />正在停止...</> : "结束并转写"}
           </button>
         </div>
       </section>
@@ -1612,7 +1923,7 @@ function ImportScreen({
                 Start 转写
               </button>
               <button className="replace-file-action" disabled={isImporting} onClick={onBrowse} type="button">
-                {isImporting ? "正在检查..." : "更换音频文件"}
+                {isImporting ? <><BusyIndicator />正在检查...</> : "更换音频文件"}
               </button>
               <p className="drop-privacy">点击 Start 后才会开始语音识别；完成后由你决定是否调用 AI 分析。</p>
             </>
@@ -1622,7 +1933,7 @@ function ImportScreen({
               <p className="drop-title">将音频拖到这里</p>
               <p className="drop-help">WAV 或 M4A · 单个文件</p>
               <button className="primary-action compact" disabled={isImporting} onClick={onBrowse} type="button">
-                {isImporting ? "正在检查音频..." : "选择音频文件"}
+                {isImporting ? <><BusyIndicator />正在检查音频...</> : "选择音频文件"}
               </button>
               <p className="drop-privacy">导入操作不会移动或删除原始文件，也不会自动开始转写。</p>
             </>
@@ -1634,24 +1945,33 @@ function ImportScreen({
 }
 
 function ProcessingView({
+  audioExportPath,
   error,
   meeting,
   mode,
   onBack,
   onHome,
+  onOpenSettings,
   onRetry,
+  onReveal,
+  onSaveAudio,
   progress
 }: {
+  audioExportPath: string | null;
   error: string | null;
   meeting: MeetingMetadata | null;
   mode: ProcessingMode;
   onBack(): void;
   onHome(): void;
+  onOpenSettings(): void;
   onRetry(): void;
+  onReveal(): void;
+  onSaveAudio(): void;
   progress: ProcessingProgressUpdate | null;
 }) {
   const stage = visibleProcessingStage(progress?.step, mode);
   const percent = visibleProgress(progress, mode);
+  const hasAudio = hasRecordedAudio(meeting);
   const steps = mode === "analysis"
     ? [["读取文字稿", 18], ["AI 分析", 72], ["保存分析", 100]]
     : [["检测声音", 12], ["生成文字", 72], ["保存文字稿", 100]];
@@ -1663,9 +1983,12 @@ function ProcessingView({
         <p className="eyebrow">{mode === "analysis" ? "AI ANALYSIS" : "TRANSCRIBING"}</p>
         <h1>{error ? "处理暂时中断。" : processingHeading(progress?.step, mode)}</h1>
         <p className="processing-file">{meeting?.title ?? "音频文件"}</p>
-        <div className="processing-meter"><span style={{ transform: `scaleX(${percent / 100})` }} /></div>
+        <div className="processing-meter" data-active={!error && percent < 100}>
+          <span style={{ transform: `scaleX(${percent / 100})` }} />
+          {!error && percent < 100 ? <i className="processing-scan" aria-hidden="true" /> : null}
+        </div>
         <div className="processing-status">
-          <span>{error ? "需要处理" : stage}</span>
+          <span className="processing-stage" role="status">{!error && percent < 100 ? <BusyIndicator /> : null}{error ? "需要处理" : stage}</span>
           <strong>{error ? "—" : `${percent}%`}</strong>
         </div>
         <div className="processing-steps" aria-label="转写步骤">
@@ -1676,8 +1999,20 @@ function ProcessingView({
         {error ? (
           <div className="processing-error">
             <p>{error}</p>
+            {hasAudio ? (
+              <p className="processing-error-note">
+                录音已完整保存在本地工作区（{formatTrackSummary(meeting)}），不会因为这次失败而丢失。
+                你可以配置好转写服务后重新转写，或者先把音频另存为文件。
+              </p>
+            ) : null}
+            {audioExportPath ? (
+              <p className="processing-error-note">音频已另存到 {audioExportPath}</p>
+            ) : null}
             <div>
               <button onClick={onBack} type="button">返回首页</button>
+              <button onClick={onOpenSettings} type="button">打开设置</button>
+              {hasAudio ? <button onClick={onReveal} type="button">打开文件夹</button> : null}
+              {hasAudio ? <button onClick={onSaveAudio} type="button">另存音频</button> : null}
               <button className="solid-small" onClick={onRetry} type="button">重新转写</button>
             </div>
           </div>
@@ -1694,6 +2029,7 @@ function ProcessingView({
 }
 
 function TranscriptView({
+  isAnalyzing,
   detail,
   error,
   meeting,
@@ -1703,6 +2039,7 @@ function TranscriptView({
   onRename,
   onReveal
 }: {
+  isAnalyzing: boolean;
   detail: MeetingDetailData | null;
   error: string | null;
   meeting: MeetingMetadata | null;
@@ -1837,7 +2174,7 @@ function TranscriptView({
 
       {!detail && !error ? <AnalysisSkeleton /> : null}
       {detail ? (
-        <section className="analysis-section" aria-label="AI 会议分析">
+        <section className="analysis-section" aria-label="AI 会议分析" aria-busy={isAnalyzing}>
           <div className="analysis-heading">
             <div>
               <p className="eyebrow">AI MEETING ANALYSIS</p>
@@ -1845,10 +2182,10 @@ function TranscriptView({
             </div>
             <div className="analysis-heading-action">
               <span>{analysis?.analysisByLanguage ? "已根据完整文字稿生成" : analysis ? "检测到旧版分析格式" : "本次记录尚未生成分析"}</span>
-              {analysis?.analysisByLanguage ? <button onClick={onAnalyze} type="button">重新分析</button> : null}
+              {analysis?.analysisByLanguage ? <button disabled={isAnalyzing} onClick={onAnalyze} type="button">重新分析</button> : null}
             </div>
           </div>
-          {analysis ? (
+          {isAnalyzing ? <div className="analysis-pending" role="status"><BusyIndicator /><strong>AI 正在分析会议</strong><p>你可以继续阅读、搜索和复制下方文字稿。</p><AnalysisSkeleton /></div> : analysis ? (
             analysis.analysisByLanguage ? (
               <div className="localized-analysis">
                 <div className="analysis-language-switch" role="tablist" aria-label="分析语言">
@@ -2071,23 +2408,6 @@ function LevelMeter({ active, level }: { active: boolean; level: number }) {
   );
 }
 
-function LiveWaveform({
-  microphone,
-  paused,
-  system
-}: {
-  microphone: RecordingAudioLevel[];
-  paused: boolean;
-  system: RecordingAudioLevel[];
-}) {
-  const bars = createWaveBars(system, microphone);
-  return (
-    <div className={`live-waveform ${paused ? "paused" : ""}`} aria-label="实时音频波形">
-      {bars.map((height, index) => <span key={index} style={{ transform: `scaleY(${height})` }} />)}
-    </div>
-  );
-}
-
 function ImportLines() {
   return (
     <div className="import-lines" aria-hidden="true">
@@ -2106,6 +2426,7 @@ function LoadingScreen() {
   return (
     <main className="transcription-app loading-screen">
       <div className="loading-shell">
+        <p className="loading-caption" role="status"><BusyIndicator />正在准备工作区</p>
         <div className="skeleton wordmark-skeleton" />
         <div className="skeleton title-skeleton" />
         <div className="skeleton path-skeleton" />
@@ -2117,7 +2438,7 @@ function LoadingScreen() {
 
 function TranscriptSkeleton() {
   return (
-    <div className="transcript-skeleton">
+    <div className="transcript-skeleton" aria-label="正在加载文字稿" aria-busy="true">
       {[0, 1, 2].map((item) => <div key={item}><span /><p /></div>)}
     </div>
   );
@@ -2125,7 +2446,7 @@ function TranscriptSkeleton() {
 
 function AnalysisSkeleton() {
   return (
-    <div className="analysis-skeleton" aria-label="正在加载会议分析">
+    <div className="analysis-skeleton" aria-label="正在加载会议分析" aria-busy="true">
       <div className="skeleton" />
       <div className="skeleton" />
       <div className="skeleton" />
@@ -2134,15 +2455,20 @@ function AnalysisSkeleton() {
 }
 
 function useRecordingTimer(meeting: MeetingMetadata | null, paused: boolean): number {
-  const [elapsed, setElapsed] = useState(() => initialElapsed(meeting));
+  const [elapsed, setElapsed] = useState(0);
+  const [timerMeetingId, setTimerMeetingId] = useState(meeting?.id);
+  if (timerMeetingId !== meeting?.id) {
+    setTimerMeetingId(meeting?.id);
+    setElapsed(meeting ? initialElapsed(meeting) : 0);
+  }
 
   useEffect(() => {
-    if (paused) {
+    if (paused || !meeting) {
       return;
     }
     const timer = window.setInterval(() => setElapsed((current) => current + 1), 1000);
     return () => window.clearInterval(timer);
-  }, [paused]);
+  }, [paused, meeting]);
 
   return elapsed;
 }
@@ -2165,16 +2491,6 @@ function createFallbackLevels(
     system: sources.system ? [{ level: 0.42, occurredAt }] : [],
     microphone: sources.microphone ? [{ level: 0.35, occurredAt }] : []
   };
-}
-
-function createWaveBars(system: RecordingAudioLevel[], microphone: RecordingAudioLevel[]): number[] {
-  const combined = Array.from({ length: 64 }, (_, index) => {
-    const systemLevel = system.at(index - 64)?.level ?? 0;
-    const microphoneLevel = microphone.at(index - 64)?.level ?? 0;
-    const liveLevel = Math.max(systemLevel, microphoneLevel);
-    return liveLevel > 0 ? Math.max(0.08, liveLevel) : 0.12 + ((index * 17) % 9) / 38;
-  });
-  return combined;
 }
 
 function buildProcessingPreferences(
@@ -2365,6 +2681,10 @@ function formatMeetingStatus(status: MeetingMetadata["status"]): string {
   }
 }
 
+function hasRecordedAudio(meeting: MeetingMetadata | null): boolean {
+  return Boolean(meeting?.audioTracks.system?.hasAudio || meeting?.audioTracks.microphone?.hasAudio);
+}
+
 function formatTrackSummary(meeting: MeetingMetadata | null): string {
   const hasSystem = Boolean(meeting?.audioTracks.system);
   const hasMicrophone = Boolean(meeting?.audioTracks.microphone);
@@ -2389,8 +2709,4 @@ function formatLanguage(value: LanguageOptionValue | undefined): string {
 
 function trackLabel(track: AudioTrack): string {
   return track === "system" ? "系统声音" : "麦克风";
-}
-
-function formatError(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

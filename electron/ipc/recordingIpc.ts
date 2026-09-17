@@ -6,11 +6,13 @@ import type { MeetingMetadata } from "../../src/features/meetings/meetingTypes.j
 import type { MeetingStore } from "../../src/features/meetings/meetingStore.js";
 import type {
   AudioCaptureStartRequest,
+  AudioCaptureDevice,
   AudioCaptureProvider,
   AudioCaptureUnsubscribe
 } from "../../src/features/recording/audioCaptureProvider.js";
 import { createRecordingSession } from "../../src/features/recording/recordingSession.js";
 import { createDemoAudioCaptureProvider } from "./demoAudioCaptureProvider.js";
+import { sendIfAlive } from "./sendIfAlive.js";
 
 export { createDemoAudioCaptureProvider } from "./demoAudioCaptureProvider.js";
 
@@ -35,7 +37,7 @@ export function registerRecordingIpc({
   store,
   audioCaptureMode = "production",
   createAudioCaptureProvider
-}: RecordingIpcContext): void {
+}: RecordingIpcContext): { shutdown(): Promise<void> } {
   let activeSession:
     | {
         meetingId: string;
@@ -51,12 +53,25 @@ export function registerRecordingIpc({
       }
     | undefined;
 
+  let deviceListRequest: Promise<AudioCaptureDevice[]> | undefined;
+  let audioOperations: Promise<void> = Promise.resolve();
+  let shuttingDown = false;
+  let shutdownPromise: Promise<void> | undefined;
+  function scheduleAudio<T>(operation: () => Promise<T>): Promise<T> {
+    const result = audioOperations.then(operation);
+    // A failed operation must not block later stop or retry requests.
+    audioOperations = result.then(() => undefined, () => undefined);
+    return result;
+  }
+
   ipcMain.handle("recording:list-devices", async () => {
+    if (deviceListRequest) return deviceListRequest;
     const provider = resolveAudioCaptureProvider({
       mode: audioCaptureMode,
       createAudioCaptureProvider
     });
-    return provider.listDevices();
+    deviceListRequest = provider.listDevices().finally(() => { deviceListRequest = undefined; });
+    return deviceListRequest;
   });
 
   ipcMain.handle(
@@ -65,7 +80,8 @@ export function registerRecordingIpc({
       _event,
       meetingId: string,
       options?: RecordingStartIpcOptions
-    ): Promise<MeetingMetadata> => {
+    ): Promise<MeetingMetadata> => scheduleAudio(async () => {
+      if (shuttingDown) throw new Error("Application is closing");
       if (activeSession) {
         throw new Error("A recording is already active");
       }
@@ -83,7 +99,7 @@ export function registerRecordingIpc({
         createAudioCaptureProvider
       });
       const unsubscribeLevel = provider.onLevel((update) => {
-        _event.sender.send("recording:level", { ...update, source: "recording" });
+        if (!shuttingDown) sendIfAlive(_event.sender, "recording:level", { ...update, source: "recording" });
       });
       const session = createRecordingSession({ provider });
       try {
@@ -122,10 +138,10 @@ export function registerRecordingIpc({
       };
       await store.writeMetadata(updatedMetadata);
       return updatedMetadata;
-    }
+    })
   );
 
-  ipcMain.handle("recording:stop", async (): Promise<MeetingMetadata> => {
+  async function stopRecording(): Promise<MeetingMetadata> {
     if (!activeSession) {
       throw new Error("No recording is active");
     }
@@ -166,7 +182,8 @@ export function registerRecordingIpc({
         activeSession = undefined;
       }
     }
-  });
+  }
+  ipcMain.handle("recording:stop", () => scheduleAudio(stopRecording));
 
   ipcMain.handle("recording:pause", async (): Promise<MeetingMetadata> => {
     if (!activeSession) {
@@ -188,7 +205,8 @@ export function registerRecordingIpc({
 
   ipcMain.handle(
     "recording:probe-start",
-    async (_event, options?: RecordingStartIpcOptions): Promise<void> => {
+    async (_event, options?: RecordingStartIpcOptions): Promise<void> => scheduleAudio(async () => {
+      if (shuttingDown) throw new Error("Application is closing");
       if (activeSession) {
         throw new Error("Cannot start audio probe while recording is active");
       }
@@ -205,7 +223,7 @@ export function registerRecordingIpc({
         createAudioCaptureProvider
       });
       const unsubscribeLevel = provider.onLevel((update) => {
-        _event.sender.send("recording:level", { ...update, source: "preflight" });
+        if (!shuttingDown) sendIfAlive(_event.sender, "recording:level", { ...update, source: "preflight" });
       });
 
       try {
@@ -221,10 +239,10 @@ export function registerRecordingIpc({
         tempDirectory,
         unsubscribeLevel
       };
-    }
+    })
   );
 
-  ipcMain.handle("recording:probe-stop", async (): Promise<void> => {
+  ipcMain.handle("recording:probe-stop", async (): Promise<void> => scheduleAudio(async () => {
     if (!activeProbe) {
       return;
     }
@@ -232,7 +250,29 @@ export function registerRecordingIpc({
     const probe = activeProbe;
     activeProbe = undefined;
     await stopActiveProbe(probe);
-  });
+  }));
+
+  return {
+    shutdown() {
+      if (shutdownPromise) return shutdownPromise;
+      shuttingDown = true;
+      shutdownPromise = scheduleAudio(async () => {
+        // Both paths run even if one cleanup fails. Meeting audio is never deleted.
+        const results = await Promise.allSettled([
+          (async () => {
+            const probe = activeProbe;
+            activeProbe = undefined;
+            if (probe) await stopActiveProbe(probe);
+          })(),
+          activeSession ? stopRecording() : Promise.resolve()
+        ]);
+        if (results.some((result) => result.status === "rejected")) {
+          throw new Error("Audio shutdown did not complete successfully; local recording artifacts were preserved.");
+        }
+      });
+      return shutdownPromise;
+    }
+  };
 }
 
 async function stopActiveProbe(probe: {

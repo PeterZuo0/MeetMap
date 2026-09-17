@@ -88,3 +88,40 @@ test("applies Windows startup integration when open at startup changes", async (
     await rm(baseDirectory, { force: true, recursive: true });
   }
 });
+
+test("reports a saved provider with a transcription model as the configured service", async () => {
+  const manager = createSettingsManager({
+    configPath: join(tmpdir(), "meetmap-settings-status.json"),
+    env: {},
+    getConfiguredProvider: () => ({
+      name: "公司 Azure OpenAI",
+      model: "gpt-4.1-mini",
+      transcriptionModel: "gpt-4o-mini-transcribe"
+    })
+  });
+
+  await expect(manager.getRuntimeStatus()).resolves.toEqual({
+    openAi: {
+      configured: true,
+      source: "公司 Azure OpenAI",
+      structureModel: "gpt-4.1-mini",
+      transcriptionModel: "gpt-4o-mini-transcribe"
+    }
+  });
+});
+
+test("stays unconfigured while the enabled provider has no transcription model", async () => {
+  const manager = createSettingsManager({
+    configPath: join(tmpdir(), "meetmap-settings-status.json"),
+    env: {},
+    getConfiguredProvider: () => ({
+      name: "Ollama（本地）",
+      model: "qwen3:8b",
+      transcriptionModel: ""
+    })
+  });
+
+  const status = await manager.getRuntimeStatus();
+  expect(status.openAi.configured).toBe(false);
+  expect(status.openAi.source).toBe("Ollama（本地）（未选择转写模型）");
+});

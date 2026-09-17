@@ -1,6 +1,6 @@
 {
   "name": "meetmap",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Windows-first desktop meeting assistant for meeting capture, transcription, summaries, and maps.",
   "packageManager": "pnpm@10.30.0",

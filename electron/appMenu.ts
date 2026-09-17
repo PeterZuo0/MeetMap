@@ -1,4 +1,5 @@
 import { BrowserWindow, Menu, type MenuItemConstructorOptions } from "electron";
+import { sendIfAlive } from "./ipc/sendIfAlive.js";
 
 export const OPEN_SETTINGS_CHANNEL = "app:open-settings";
 
@@ -47,7 +48,7 @@ export function createApplicationMenuTemplate(
 export function installApplicationMenu(): void {
   const template = createApplicationMenuTemplate(() => {
     const targetWindow = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
-    targetWindow?.webContents.send(OPEN_SETTINGS_CHANNEL);
+    if (targetWindow && !targetWindow.isDestroyed()) sendIfAlive(targetWindow.webContents, OPEN_SETTINGS_CHANNEL);
   });
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }

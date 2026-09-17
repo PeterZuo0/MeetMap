@@ -225,54 +225,93 @@ internal static class Program
 
   private sealed class LevelReporter
   {
-    private readonly Dictionary<string, DateTimeOffset> lastReportedAt = new(StringComparer.OrdinalIgnoreCase);
+    private const int ReportIntervalMilliseconds = 40;
+
+    private readonly Dictionary<string, TrackLevelAccumulator> accumulators =
+      new(StringComparer.OrdinalIgnoreCase);
     private readonly object gate = new();
 
     public void Report(string track, byte[] buffer, int bytesRecorded, WaveFormat waveFormat)
     {
+      var measurement = Measure(buffer, bytesRecorded, waveFormat);
       var now = DateTimeOffset.UtcNow;
+      double rms;
+      double peak;
+
       lock (gate)
       {
-        if (
-          lastReportedAt.TryGetValue(track, out var lastReported) &&
-          now - lastReported < TimeSpan.FromMilliseconds(500)
-        )
+        if (!accumulators.TryGetValue(track, out var accumulator))
+        {
+          accumulator = new TrackLevelAccumulator { LastReportedAt = now };
+          accumulators[track] = accumulator;
+        }
+
+        accumulator.SumSquares += measurement.SumSquares;
+        accumulator.SampleCount += measurement.SampleCount;
+        accumulator.Peak = Math.Max(accumulator.Peak, measurement.Peak);
+
+        if (now - accumulator.LastReportedAt < TimeSpan.FromMilliseconds(ReportIntervalMilliseconds))
         {
           return;
         }
 
-        lastReportedAt[track] = now;
+        rms = accumulator.SampleCount == 0
+          ? 0
+          : Math.Min(1, Math.Sqrt(accumulator.SumSquares / accumulator.SampleCount));
+        peak = Math.Min(1, accumulator.Peak);
+        accumulator.LastReportedAt = now;
+        accumulator.SumSquares = 0;
+        accumulator.SampleCount = 0;
+        accumulator.Peak = 0;
       }
 
       Console.WriteLine(
         string.Create(
           CultureInfo.InvariantCulture,
-          $"LEVEL {track} {CalculateLevel(buffer, bytesRecorded, waveFormat):0.0000}"
+          $"LEVEL {track} {rms:0.0000} {peak:0.0000}"
         )
       );
     }
 
-    private static double CalculateLevel(byte[] buffer, int bytesRecorded, WaveFormat waveFormat)
+    private static TrackLevelMeasurement Measure(
+      byte[] buffer,
+      int bytesRecorded,
+      WaveFormat waveFormat
+    )
     {
       var bytesPerSample = Math.Max(1, waveFormat.BitsPerSample / 8);
       if (bytesRecorded < bytesPerSample)
       {
-        return 0;
+        return new TrackLevelMeasurement(0, 0, 0);
       }
 
       double sumSquares = 0;
+      double peak = 0;
       var sampleCount = 0;
       for (var index = 0; index + bytesPerSample <= bytesRecorded; index += bytesPerSample)
       {
         var sample = ReadSample(buffer, index, waveFormat);
         sumSquares += sample * sample;
+        peak = Math.Max(peak, Math.Abs(sample));
         sampleCount++;
       }
 
-      return sampleCount == 0
-        ? 0
-        : Math.Min(1, Math.Sqrt(sumSquares / sampleCount));
+      return new TrackLevelMeasurement(sumSquares, peak, sampleCount);
     }
+
+    private sealed class TrackLevelAccumulator
+    {
+      public DateTimeOffset LastReportedAt { get; set; }
+      public double SumSquares { get; set; }
+      public double Peak { get; set; }
+      public long SampleCount { get; set; }
+    }
+
+    private readonly record struct TrackLevelMeasurement(
+      double SumSquares,
+      double Peak,
+      int SampleCount
+    );
 
     private static double ReadSample(byte[] buffer, int index, WaveFormat waveFormat)
     {

@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import type { MeetingMetadata } from "../features/meetings/meetingTypes";
 import { DEFAULT_APP_SETTINGS } from "../features/settings/appSettings";
@@ -184,6 +184,7 @@ function installApi(overrides: Partial<MeetMapApi> = {}): MeetMapApi {
     analyzeMeeting: vi.fn(async () => completedMeeting()),
     getMeetingDetailData: vi.fn(async () => detailFixture()),
     revealMeetingFolder: vi.fn(async () => undefined),
+    saveLlmProvider: vi.fn(async () => ({ activeProviderId: null, providers: [] })),
     ...overrides
   } as MeetMapApi;
 
@@ -238,6 +239,244 @@ test("opens user settings from the Edit menu event and saves custom content", as
     summaryInstructions: "优先总结客户反馈和明确负责人。"
   })));
   expect(await screen.findByText("设置已保存到本地。")).toBeInTheDocument();
+});
+
+test("opens settings over an active recording instead of blocking them", async () => {
+  let openSettings = () => undefined;
+  installApi({
+    onOpenSettings: vi.fn((callback) => {
+      openSettings = callback;
+      return () => undefined;
+    })
+  });
+  render(<App />);
+
+  fireEvent.click(await screen.findByRole("button", { name: /即时会议/ }));
+  fireEvent.click(await screen.findByRole("button", { name: "开始录制" }));
+  expect(await screen.findByText("正在录制")).toBeInTheDocument();
+
+  act(() => openSettings());
+
+  expect(await screen.findByRole("dialog")).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "偏好与模型连接" })).toBeInTheDocument();
+  expect(screen.queryByText("录音或处理期间暂时不能打开设置。")).not.toBeInTheDocument();
+  // The recording keeps running behind the dialog.
+  expect(screen.getByText("正在录制")).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "关闭设置" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+});
+
+test("keeps the recorded audio reachable when transcription is not configured", async () => {
+  const recorded = metadata({
+    status: "recorded",
+    audioTracks: {
+      microphone: {
+        id: "microphone",
+        filePath: "C:\\MeetMapWorkspace\\meetings\\meeting-1\\audio\\microphone.wav",
+        format: "wav",
+        hasAudio: true,
+        durationMs: 72_000
+      }
+    }
+  });
+  const api = installApi({
+    stopRecording: vi.fn(async () => recorded),
+    processMeeting: vi.fn(async () => {
+      throw new Error("音频转写尚未配置。");
+    }),
+    saveMeetingAudio: vi.fn(async () => "C:\\Users\\me\\Desktop\\meeting.wav"),
+    listMeetings: vi.fn(async () => [recorded])
+  });
+  render(<App />);
+
+  fireEvent.click(await screen.findByRole("button", { name: /即时会议/ }));
+  fireEvent.click(await screen.findByRole("button", { name: "开始录制" }));
+  fireEvent.click(await screen.findByRole("button", { name: "结束并转写" }));
+
+  expect(await screen.findByText(/音频转写尚未配置/)).toBeInTheDocument();
+  expect(await screen.findByText(/录音已完整保存在本地工作区/)).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "打开文件夹" }));
+  await waitFor(() => expect(api.revealMeetingFolder).toHaveBeenCalledWith("meeting-1"));
+
+  fireEvent.click(screen.getByRole("button", { name: "另存音频" }));
+  await waitFor(() => expect(api.saveMeetingAudio).toHaveBeenCalledWith("meeting-1"));
+  expect(await screen.findByText(/音频已另存到/)).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "打开设置" }));
+  expect(await screen.findByRole("dialog")).toBeInTheDocument();
+});
+
+test("offers transcription for a stored recording that never produced a transcript", async () => {
+  const recorded = metadata({
+    status: "failed",
+    audioTracks: {
+      system: {
+        id: "system",
+        filePath: "C:\\MeetMapWorkspace\\meetings\\meeting-1\\audio\\system.wav",
+        format: "wav",
+        hasAudio: true,
+        durationMs: 72_000
+      }
+    }
+  });
+  const api = installApi({ listMeetings: vi.fn(async () => [recorded]) });
+  render(<App />);
+
+  expect(await screen.findByText("处理失败")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "转写" }));
+
+  await waitFor(() => expect(api.processMeeting).toHaveBeenCalledWith("meeting-1", expect.anything()));
+});
+
+test("fills the model dropdown from the provider's own model list", async () => {
+  let openSettings = () => undefined;
+  const api = installApi({
+    onOpenSettings: vi.fn((callback) => {
+      openSettings = callback;
+      return () => undefined;
+    }),
+    getLlmProviders: vi.fn(async () => ({ activeProviderId: null, providers: [] })),
+    listLlmModels: vi.fn(async () => ["gpt-4.1", "gpt-4o-mini"])
+  });
+  render(<App />);
+
+  await screen.findByRole("heading", { name: /把会议声音/ });
+  await waitFor(() => expect(api.onOpenSettings).toHaveBeenCalled());
+  act(() => openSettings());
+
+  // The preset default is offered before anything is fetched.
+  const modelField = await screen.findByLabelText("分析模型");
+  expect(modelField).toHaveValue("gpt-4.1-mini");
+
+  fireEvent.click(screen.getByRole("button", { name: "获取模型列表" }));
+  await waitFor(() => expect(api.listLlmModels).toHaveBeenCalledWith({
+    baseUrl: "https://api.openai.com/v1",
+    apiKey: undefined,
+    providerId: undefined
+  }));
+
+  expect(await screen.findByText("读取到 2 个可用模型。")).toBeInTheDocument();
+  expect(within(screen.getByLabelText("分析模型")).getByRole("option", { name: "gpt-4o-mini" }))
+    .toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("分析模型"), { target: { value: "gpt-4o-mini" } });
+  expect(screen.getByLabelText("分析模型")).toHaveValue("gpt-4o-mini");
+
+  fireEvent.click(screen.getByRole("button", { name: "保存提供商" }));
+  await waitFor(() => expect(api.saveLlmProvider).toHaveBeenCalledWith(expect.objectContaining({
+    model: "gpt-4o-mini"
+  })));
+});
+
+test("keeps a custom model id available when the service does not list it", async () => {
+  let openSettings = () => undefined;
+  installApi({
+    onOpenSettings: vi.fn((callback) => {
+      openSettings = callback;
+      return () => undefined;
+    }),
+    getLlmProviders: vi.fn(async () => ({ activeProviderId: null, providers: [] }))
+  });
+  render(<App />);
+
+  await screen.findByRole("heading", { name: /把会议声音/ });
+  act(() => openSettings());
+
+  fireEvent.change(await screen.findByLabelText("分析模型"), { target: { value: "__custom__" } });
+  fireEvent.change(screen.getByLabelText("分析模型"), { target: { value: "my-azure-deployment" } });
+
+  expect(screen.getByLabelText("分析模型")).toHaveValue("my-azure-deployment");
+});
+
+test("a local preset fills the form and loads its models without an API key", async () => {
+  let openSettings = () => undefined;
+  const api = installApi({
+    onOpenSettings: vi.fn((callback) => {
+      openSettings = callback;
+      return () => undefined;
+    }),
+    getLlmProviders: vi.fn(async () => ({ activeProviderId: null, providers: [] })),
+    listLlmModels: vi.fn(async () => ["llama3.1:8b", "qwen3:8b"])
+  });
+  render(<App />);
+
+  await screen.findByRole("heading", { name: /把会议声音/ });
+  act(() => openSettings());
+  fireEvent.click(await screen.findByRole("button", { name: "Ollama" }));
+
+  expect(screen.getByLabelText("名称")).toHaveValue("Ollama（本地）");
+  expect(screen.getByLabelText("API Base URL")).toHaveValue("http://localhost:11434/v1");
+  expect(screen.getByLabelText("本地服务，不需要 API Key")).toBeChecked();
+  expect(screen.getByLabelText("API Key")).toHaveValue("");
+
+  await waitFor(() => expect(api.listLlmModels).toHaveBeenCalledWith({
+    baseUrl: "http://localhost:11434/v1",
+    apiKey: undefined,
+    providerId: undefined
+  }));
+  expect(await screen.findByText("读取到 2 个可用模型。")).toBeInTheDocument();
+  // The preset default is still offered by the service, so it stays selected.
+  expect(screen.getByLabelText("分析模型")).toHaveValue("qwen3:8b");
+  expect(within(screen.getByLabelText("分析模型")).getByRole("option", { name: "llama3.1:8b" }))
+    .toBeInTheDocument();
+  // A local runtime has no speech-to-text endpoint, so transcription stays unset.
+  expect(screen.getByLabelText("转写模型")).toHaveValue("");
+});
+
+test("waits for the API key before loading models for a hosted preset", async () => {
+  let openSettings = () => undefined;
+  const api = installApi({
+    onOpenSettings: vi.fn((callback) => {
+      openSettings = callback;
+      return () => undefined;
+    }),
+    getLlmProviders: vi.fn(async () => ({ activeProviderId: null, providers: [] })),
+    listLlmModels: vi.fn(async () => ["gpt-4.1", "gpt-4o-mini"])
+  });
+  render(<App />);
+
+  await screen.findByRole("heading", { name: /把会议声音/ });
+  act(() => openSettings());
+  fireEvent.click(await screen.findByRole("button", { name: "OpenAI" }));
+
+  expect(api.listLlmModels).not.toHaveBeenCalled();
+  expect(screen.getByText("填写 API Key 后会自动读取该服务的模型列表。")).toBeInTheDocument();
+
+  const apiKeyField = screen.getByLabelText("API Key");
+  fireEvent.change(apiKeyField, { target: { value: "sk-live" } });
+  fireEvent.blur(apiKeyField);
+
+  await waitFor(() => expect(api.listLlmModels).toHaveBeenCalledWith({
+    baseUrl: "https://api.openai.com/v1",
+    apiKey: "sk-live",
+    providerId: undefined
+  }));
+  expect(await screen.findByText("读取到 2 个可用模型。")).toBeInTheDocument();
+});
+
+test("reports an automatic model lookup failure as a note, not an error", async () => {
+  let openSettings = () => undefined;
+  installApi({
+    onOpenSettings: vi.fn((callback) => {
+      openSettings = callback;
+      return () => undefined;
+    }),
+    getLlmProviders: vi.fn(async () => ({ activeProviderId: null, providers: [] })),
+    listLlmModels: vi.fn(async () => {
+      throw new Error("Error invoking remote method 'llm-provider:list-models': Error: 连接被拒绝。");
+    })
+  });
+  render(<App />);
+
+  await screen.findByRole("heading", { name: /把会议声音/ });
+  act(() => openSettings());
+  fireEvent.click(await screen.findByRole("button", { name: "LM Studio" }));
+
+  // The Electron IPC wrapper is stripped and the tone stays advisory.
+  const note = await screen.findByText("未能自动获取模型列表：连接被拒绝。可以手动填写模型 ID。");
+  expect(note).toHaveClass("settings-note");
+  expect(screen.getByLabelText("分析模型")).toHaveValue("local-model");
 });
 
 test("requires a workspace and lets the user choose the save location", async () => {
@@ -318,6 +557,50 @@ test("validates an imported audio file and waits for Start before transcription"
   expect(screen.getByRole("heading", { name: "Manual analysis" })).toBeInTheDocument();
   expect(screen.queryByText("确认本次发布所需的转写能力与交付边界。")).not.toBeInTheDocument();
   expect(screen.queryByText(/结构图|会议图/)).not.toBeInTheDocument();
+});
+
+test("keeps transcript searchable while analysis is pending and after failure", async () => {
+  let rejectAnalysis!: (reason: Error) => void;
+  const api = installApi({
+    listMeetings: vi.fn(async () => [completedMeeting()]),
+    getMeetingDetailData: vi.fn(async () => ({ ...detailFixture(), structure: null })),
+    analyzeMeeting: vi.fn(() => new Promise<MeetingMetadata>((_resolve, reject) => { rejectAnalysis = reject; }))
+  });
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: /季度设计讨论/ }));
+  fireEvent.click(await screen.findByRole("button", { name: "开始 AI 分析" }));
+  expect(screen.getByLabelText("AI 会议分析")).toHaveAttribute("aria-busy", "true");
+  expect(screen.getByText("我们先确认这次发布需要完成的转写功能。")).toBeInTheDocument();
+  fireEvent.change(screen.getByRole("searchbox", { name: "搜索文字稿" }), { target: { value: "不存在的文字" } });
+  expect(screen.queryByText("我们先确认这次发布需要完成的转写功能。")).not.toBeInTheDocument();
+  fireEvent.change(screen.getByRole("searchbox", { name: "搜索文字稿" }), { target: { value: "" } });
+  await act(async () => rejectAnalysis(new Error("模型暂不可用")));
+  expect(screen.getByText("我们先确认这次发布需要完成的转写功能。")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "开始 AI 分析" })).toBeEnabled();
+  expect(api.analyzeMeeting).toHaveBeenCalledTimes(1);
+});
+
+test("keeps recording across navigation and controls the same session from the dock", async () => {
+  const api = installApi({ listMeetings: vi.fn(async () => [completedMeeting()]) });
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: /即时会议/ }));
+  fireEvent.click(await screen.findByRole("button", { name: "开始录制" }));
+  await screen.findByText("正在录制");
+  fireEvent.click(screen.getByRole("button", { name: "主页" }));
+  expect(api.stopRecording).not.toHaveBeenCalled();
+  expect(screen.getByLabelText("录音小窗")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: /季度设计讨论/ }));
+  await screen.findByText("我们先确认这次发布需要完成的转写功能。");
+  fireEvent.click(within(screen.getByLabelText("录音小窗")).getByRole("button", { name: "暂停" }));
+  await waitFor(() => expect(api.pauseRecording).toHaveBeenCalledTimes(1));
+  fireEvent.click(await screen.findByRole("button", { name: "继续录制" }));
+  await waitFor(() => expect(api.resumeRecording).toHaveBeenCalledTimes(1));
+  fireEvent.click(screen.getByRole("button", { name: "返回录音" }));
+  expect(api.startRecording).toHaveBeenCalledTimes(1);
+  expect(api.stopRecording).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "结束并转写" }));
+  await waitFor(() => expect(api.stopRecording).toHaveBeenCalledTimes(1));
+  expect(screen.queryByLabelText("录音小窗")).not.toBeInTheDocument();
 });
 
 test("shows completed transcripts on the home screen", async () => {
@@ -404,4 +687,28 @@ test("replaces legacy mixed-language analysis with an explicit AI quick-summary 
     expect.objectContaining({ transcriptOnly: false })
   ));
   expect(await screen.findByText("团队确认了语音转写功能的发布范围。")).toBeInTheDocument();
+});
+
+test("waits for device enumeration and starts only one preflight with the resolved devices", async () => {
+  type Devices = Awaited<ReturnType<NonNullable<MeetMapApi["listAudioDevices"]>>>;
+  let resolveDevices!: (devices: Devices) => void;
+  const api = installApi({
+    listAudioDevices: vi.fn(() => new Promise<Devices>((resolve) => { resolveDevices = resolve; }))
+  });
+  const view = render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: /即时会议/ }));
+  expect(screen.getByRole("button", { name: "正在识别音频设备..." })).toBeDisabled();
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 180)); });
+  expect(api.startAudioProbe).not.toHaveBeenCalled();
+  await act(async () => resolveDevices([
+    { id: "windows-default-system", label: "System", track: "system" },
+    { id: "microphone:1", label: "Microphone", track: "microphone" }
+  ]));
+  await waitFor(() => expect(api.startAudioProbe).toHaveBeenCalledTimes(1));
+  expect(api.startAudioProbe).toHaveBeenCalledWith({
+    audioSources: { system: true, microphone: true },
+    deviceIds: { system: "windows-default-system", microphone: "microphone:1" }
+  });
+  view.unmount();
+  expect(api.stopAudioProbe).toHaveBeenCalledTimes(1);
 });

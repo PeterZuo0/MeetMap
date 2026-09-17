@@ -278,6 +278,28 @@ describe("createWindowsAudioCaptureProvider", () => {
     ]);
   });
 
+  test("maps the reported peak alongside the RMS level", async () => {
+    const child = new FakeChildProcess();
+    const levels: Array<{ level: number; peak?: number }> = [];
+    const provider = createWindowsAudioCaptureProvider({
+      helperPath: "native.csproj",
+      spawn() {
+        return child;
+      },
+      async stat() {
+        return { size: 44 };
+      }
+    });
+    provider.onLevel((update) => levels.push({ level: update.level, peak: update.peak }));
+
+    await provider.start(systemOnlyRequest());
+    child.stdout.emit("data", Buffer.from("LEVEL system 0.0600 0.2000\r\n"));
+    child.stdout.emit("data", Buffer.from("LEVEL system 0.0600\r\n"));
+
+    expect(levels[0].peak).toBeGreaterThan(levels[0].level);
+    expect(levels[1].peak).toBe(levels[1].level);
+  });
+
   test("starts published helper directly when an exe path is configured", async () => {
     const child = new FakeChildProcess();
     const spawnCalls: Parameters<WindowsAudioCaptureSpawn>[] = [];

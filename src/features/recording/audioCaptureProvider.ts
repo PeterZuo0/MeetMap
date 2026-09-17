@@ -32,6 +32,8 @@ export type AudioCaptureStopResult = {
 export type AudioLevelUpdate = {
   track: AudioTrackId;
   level: number;
+  /** Short-window peak for the same slice, used to keep the live waveform responsive. */
+  peak?: number;
   occurredAt: string;
 };
 

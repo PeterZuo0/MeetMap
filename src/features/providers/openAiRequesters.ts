@@ -10,8 +10,7 @@ import type {
 } from "../intelligence/openAiMeetingStructureClient.js";
 import type { LlmApiStyle } from "./llmProviderConfig.js";
 
-const OPENAI_AUDIO_TRANSCRIPTIONS_URL =
-  "https://api.openai.com/v1/audio/transcriptions";
+const OPENAI_BASE_URL = "https://api.openai.com/v1";
 const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
 
 export type OpenAiFetchResponse = {
@@ -49,8 +48,24 @@ export function createOpenAiRequesters(
 export function createOpenAiAudioTranscriptionRequester(
   dependencies: OpenAiRequesterDependencies = {}
 ): OpenAiAudioTranscriptionRequester {
-  const fetchImpl = dependencies.fetch ?? (globalThis.fetch as OpenAiFetch);
-  const readFile = dependencies.readFile ?? nodeReadFile;
+  return createOpenAiCompatibleAudioTranscriptionRequester({
+    baseUrl: OPENAI_BASE_URL,
+    ...dependencies
+  });
+}
+
+/**
+ * Same multipart upload as OpenAI's, aimed at whatever OpenAI-compatible
+ * endpoint the user configured.
+ */
+export function createOpenAiCompatibleAudioTranscriptionRequester({
+  baseUrl,
+  fetch: fetchOverride,
+  readFile: readFileOverride
+}: OpenAiRequesterDependencies & { baseUrl: string }): OpenAiAudioTranscriptionRequester {
+  const fetchImpl = fetchOverride ?? (globalThis.fetch as OpenAiFetch);
+  const readFile = readFileOverride ?? nodeReadFile;
+  const transcriptionsUrl = `${baseUrl.replace(/\/+$/, "")}/audio/transcriptions`;
 
   return async (request) => {
     const audioBytes = await readFile(request.filePath);
@@ -80,11 +95,14 @@ export function createOpenAiAudioTranscriptionRequester(
       formData.append("timestamp_granularities[]", granularity);
     });
 
-    const response = await fetchImpl(OPENAI_AUDIO_TRANSCRIPTIONS_URL, {
+    const headers: Record<string, string> = {};
+    if (request.apiKey) {
+      headers.Authorization = `Bearer ${request.apiKey}`;
+    }
+
+    const response = await fetchImpl(transcriptionsUrl, {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${request.apiKey}`
-      },
+      headers,
       body: formData
     });
 

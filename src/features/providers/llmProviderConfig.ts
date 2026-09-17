@@ -7,6 +7,8 @@ export type LlmProviderProfile = {
   name: string;
   baseUrl: string;
   model: string;
+  /** Speech-to-text model on the same endpoint; empty when the service has none. */
+  transcriptionModel: string;
   apiStyle: LlmApiStyle;
   apiKeyRequired: boolean;
   apiKeyConfigured: boolean;
@@ -22,6 +24,7 @@ export type SaveLlmProviderInput = {
   name: string;
   baseUrl: string;
   model: string;
+  transcriptionModel?: string;
   apiStyle: LlmApiStyle;
   apiKeyRequired: boolean;
   apiKey?: string;

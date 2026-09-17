@@ -1,6 +1,20 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
+import type { RecordingWidgetState, RecordingWidgetAction } from "../src/features/recording/recordingWidget.js";
 
 contextBridge.exposeInMainWorld("meetMap", {
+  updateRecordingWidget: (state: unknown) => ipcRenderer.send("recording-widget:update", state),
+  recordingWidgetAction: (action: string) => ipcRenderer.send("recording-widget:action", action),
+  onRecordingWidgetState: (callback: (state: RecordingWidgetState) => void) => {
+    const listener = (_event: unknown, state: RecordingWidgetState) => callback(state);
+    ipcRenderer.on("recording-widget:state", listener);
+    ipcRenderer.send("recording-widget:ready");
+    return () => ipcRenderer.off("recording-widget:state", listener);
+  },
+  onRecordingWidgetAction: (callback: (action: RecordingWidgetAction) => void) => {
+    const listener = (_event: unknown, action: RecordingWidgetAction) => callback(action);
+    ipcRenderer.on("recording-widget:command", listener);
+    return () => ipcRenderer.off("recording-widget:command", listener);
+  },
   platform: process.platform,
   getSettings: () => ipcRenderer.invoke("settings:get"),
   updateSettings: (settings: unknown) => ipcRenderer.invoke("settings:update", settings),
@@ -25,6 +39,7 @@ contextBridge.exposeInMainWorld("meetMap", {
   deleteLlmProvider: (providerId: string) => ipcRenderer.invoke("llm-provider:delete", providerId),
   setActiveLlmProvider: (providerId: string | null) =>
     ipcRenderer.invoke("llm-provider:set-active", providerId),
+  listLlmModels: (input: unknown) => ipcRenderer.invoke("llm-provider:list-models", input),
   importAudio: (input: { outputLanguage: string; summaryStyle?: string }) =>
     ipcRenderer.invoke("meeting:import-audio", input),
   importDroppedAudio: (

@@ -1,4 +1,6 @@
 import type { AudioTrackId, MeetingMetadata, ProcessingProgressUpdate, SummaryStyle } from "../features/meetings/meetingTypes";
+import type { RecordingWidgetState, RecordingWidgetAction } from "../features/recording/recordingWidget";
+export type { RecordingWidgetState, RecordingWidgetAction } from "../features/recording/recordingWidget";
 import type { TranscriptSegment } from "../features/transcription/transcriptionTypes";
 import type { LanguageOptionValue } from "../features/settings/languageOptions";
 import type { ProcessingPreferences } from "../features/settings/processingPreferences";
@@ -23,6 +25,7 @@ export type RecordingAudioDevice = {
 export type RecordingAudioLevel = {
   track: AudioTrackId;
   level: number;
+  peak?: number;
   occurredAt: string;
   source?: "preflight" | "recording";
 };
@@ -75,6 +78,10 @@ export type { ProcessingProgressUpdate };
 export type { AppSettings, SettingsRuntimeStatus, ThemeMode, UiLanguage } from "../features/settings/appSettings";
 
 export type MeetMapApi = {
+  updateRecordingWidget?(state: RecordingWidgetState | null): void;
+  onRecordingWidgetState?(callback: (state: RecordingWidgetState) => void): () => void;
+  onRecordingWidgetAction?(callback: (action: RecordingWidgetAction) => void): () => void;
+  recordingWidgetAction?(action: RecordingWidgetAction): void;
   platform: string;
   getSettings?(): Promise<AppSettings>;
   updateSettings?(settings: AppSettings): Promise<AppSettings>;
@@ -104,6 +111,7 @@ export type MeetMapApi = {
   saveLlmProvider?(input: SaveLlmProviderInput): Promise<LlmProviderState>;
   deleteLlmProvider?(providerId: string): Promise<LlmProviderState>;
   setActiveLlmProvider?(providerId: string | null): Promise<LlmProviderState>;
+  listLlmModels?(input: { baseUrl: string; apiKey?: string; providerId?: string }): Promise<string[]>;
   startRecording(meetingId: string, options?: RecordingStartOptions): Promise<MeetingMetadata>;
   startAudioProbe?(options?: RecordingStartOptions): Promise<void>;
   stopAudioProbe?(): Promise<void>;

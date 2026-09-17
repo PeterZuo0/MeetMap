@@ -1,0 +1,92 @@
+.busy-indicator {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  width: 22px;
+  height: 16px;
+  margin-inline-end: 9px;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+
+.busy-indicator i {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.loading-caption, .processing-stage {
+  display: flex;
+  align-items: center;
+}
+
+.loading-caption {
+  margin: 0 0 22px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.processing-stage .busy-indicator { color: var(--accent); }
+.processing-meter { position: relative; }
+
+.processing-meter .processing-scan {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 22%;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  animation: activity-scan 2.4s linear infinite;
+}
+
+@keyframes activity-scan {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(560%); }
+}
+
+/* Move a translucent layer, rather than repainting the background every frame. */
+.skeleton, .transcript-skeleton span, .transcript-skeleton p {
+  position: relative;
+  overflow: hidden;
+  background: #e5e1d9;
+  animation: none;
+}
+
+.skeleton::after, .transcript-skeleton span::after, .transcript-skeleton p::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(100deg, transparent 20%, rgba(255,255,255,0.5) 50%, transparent 80%);
+  transform: translateX(-100%);
+  animation: skeleton-sweep 2s ease-in-out infinite;
+}
+
+@keyframes skeleton-sweep {
+  to { transform: translateX(100%); }
+}
+
+@media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference) {
+  .transcription-app button:not(.module-card):not(.minimal-toggle) {
+    transition: translate 180ms var(--ease), background-color 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
+  }
+  .transcription-app button:not(.module-card):not(.minimal-toggle):hover:not(:disabled) {
+    translate: 0 -2px;
+  }
+  .transcription-app button:not(.module-card):not(.minimal-toggle):active:not(:disabled) {
+    translate: 0 0;
+  }
+  .module-card .module-action { transition: translate 260ms var(--ease); }
+  .module-card:hover:not(:disabled) .module-action { translate: 4px 0; }
+  .module-card .live-visual, .module-card .import-lines {
+    transition: scale 480ms var(--ease);
+  }
+  .module-card:hover:not(:disabled) .live-visual,
+  .module-card:hover:not(:disabled) .import-lines { scale: 1.035; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .processing-scan, .skeleton::after,
+  .transcript-skeleton span::after, .transcript-skeleton p::after { display: none; }
+  .transcription-app .module-card:hover:not(:disabled) { transform: none; }
+}
+

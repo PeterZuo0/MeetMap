@@ -255,14 +255,16 @@ function spawnCaptureHelper(
 }
 
 function parseLevelLine(line: string): AudioLevelUpdate | null {
-  const match = /^LEVEL\s+(system|microphone)\s+([0-9.]+)$/i.exec(line.trim());
+  const match = /^LEVEL\s+(system|microphone)\s+([0-9.]+)(?:\s+([0-9.]+))?$/i.exec(line.trim());
   if (!match) {
     return null;
   }
 
+  const level = normalizeNativeRmsLevel(Number(match[2]));
   return {
     track: match[1].toLowerCase() as "system" | "microphone",
-    level: normalizeNativeRmsLevel(Number(match[2])),
+    level,
+    peak: match[3] === undefined ? level : normalizeNativeRmsLevel(Number(match[3])),
     occurredAt: new Date().toISOString()
   };
 }

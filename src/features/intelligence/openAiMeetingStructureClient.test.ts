@@ -103,7 +103,7 @@ describe("createOpenAiMeetingStructureClient", () => {
     expect(calls[0][0].instructions).toContain("highlights first");
     expect(calls[0][0].instructions).toContain("purposeAnalysis");
     expect(calls[0][0].instructions).toContain("technicalSummary");
-    expect(calls[0][0].instructions).toContain("fast executive summary");
+    expect(calls[0][0].instructions).toContain("detailed, evidence-grounded meeting notes");
     expect(calls[0][0].instructions).toContain("Do not prepend labels");
     expect(JSON.stringify(calls[0][0].text.format.schema)).toContain('"purposeAnalysis"');
     expect(JSON.stringify(calls[0][0].text.format.schema)).toContain('"technicalSummary"');
@@ -180,6 +180,43 @@ describe("createOpenAiMeetingStructureClient", () => {
       purposeAnalysis: "确认导出流程的范围。",
       technicalSummary: "当前实现继续包含导出流程。"
     });
+  });
+
+  test("preserves all detailed localized paragraphs for display and export", async () => {
+    const structure = validStructure();
+    const overview = [
+      "The team reviewed the export workflow.",
+      "Word output remains in the delivery scope.",
+      "The discussion covered the existing implementation.",
+      "The team considered the consequences of removing exports.",
+      "They decided to retain the workflow.",
+      "No owner or deadline was specified."
+    ];
+    const analysis = {
+      overview,
+      purpose: ["Confirm the export scope.", "Clarify the delivery boundary."],
+      topics: [{ title: "Export scope", paragraphs: overview }],
+      technicalSummary: ["Exports use structured data.", "The existing workflow remains in scope."]
+    };
+    const client = createOpenAiMeetingStructureClient({
+      apiKey: "test-key",
+      model: "gpt-4.1-mini",
+      async requestStructure() {
+        return {
+          outputJson: {
+            ...structure,
+            summary: "Short fallback.",
+            analysisByLanguage: { ...structure.analysisByLanguage, en: analysis }
+          }
+        };
+      }
+    });
+
+    const result = await client.extractStructure({ ...request, outputLanguage: "en" });
+    expect(result.summary).toBe(overview.join("\n\n"));
+    expect(result.purposeAnalysis).toBe(analysis.purpose.join("\n\n"));
+    expect(result.technicalSummary).toBe(analysis.technicalSummary.join("\n\n"));
+    expect(result.analysisByLanguage?.en.topics[0].paragraphs).toEqual(overview);
   });
 
   test("always follows the selected output language for generated summaries", async () => {

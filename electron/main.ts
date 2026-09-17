@@ -14,6 +14,10 @@ import { installApplicationMenu } from "./appMenu.js";
 import { createLlmProviderManager } from "./llmProviderManager.js";
 import { registerLlmProviderIpc } from "./ipc/llmProviderIpc.js";
 import { createConfigurableMeetingStructureClient } from "./configurableMeetingStructureClient.js";
+import { createConfigurableTranscriptionClient } from "./configurableTranscriptionClient.js";
+import { registerAudioShutdown } from "./audioShutdown.js";
+import { registerRecordingWidget } from "./recordingWidget.js";
+import type { LlmProviderWithSecret } from "../src/features/providers/llmProviderConfig.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -33,11 +37,13 @@ function createMainWindow() {
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
+      backgroundThrottling: false,
       nodeIntegration: false,
       sandbox: false
     }
   });
 
+  registerRecordingWidget(window, path.join(__dirname, "preload.js"), path.join(__dirname, "../../dist/index.html"), process.env.VITE_DEV_SERVER_URL);
   if (isDev) {
     void window.loadURL(process.env.VITE_DEV_SERVER_URL as string);
     window.webContents.openDevTools({ mode: "detach" });
@@ -48,11 +54,6 @@ function createMainWindow() {
 }
 
 app.whenReady().then(async () => {
-  await loadDotEnvFile({
-    filePath: path.join(process.cwd(), ".env"),
-    env: process.env
-  });
-
   const providerManager = createLlmProviderManager({
     configPath: path.join(app.getPath("userData"), "llm-providers.json"),
     encryptSecret(value) {
@@ -68,20 +69,55 @@ app.whenReady().then(async () => {
       return safeStorage.decryptString(Buffer.from(value, "base64"));
     }
   });
-  await providerManager.load();
+  const workspaceManager = createWorkspaceManager({
+    configPath: path.join(app.getPath("userData"), "workspace.json")
+  });
+  const settingsManager = createSettingsManager({
+    applyOpenAtStartup: (openAtStartup) => app.setLoginItemSettings({ openAtLogin: openAtStartup }),
+    configPath: path.join(app.getPath("userData"), "settings.json"),
+    env: process.env,
+    getConfiguredProvider: () => {
+      const provider = providerManager.getState().providers.find(
+        (item) => item.id === providerManager.getState().activeProviderId
+      );
+      return provider
+        ? {
+            name: provider.name,
+            model: provider.model,
+            transcriptionModel: provider.transcriptionModel
+          }
+        : null;
+    }
+  });
+  // Load independent local files together, before exposing saved state via IPC.
+  await Promise.all([
+    loadDotEnvFile({
+      filePath: path.join(process.cwd(), ".env"),
+      env: process.env
+    }),
+    providerManager.load(),
+    workspaceManager.load(),
+    settingsManager.load()
+  ]);
+  const environmentProvider: LlmProviderWithSecret | undefined = process.env.OPENAI_API_KEY
+    ? {
+        id: "environment-openai",
+        name: "OpenAI（环境变量）",
+        baseUrl: "https://api.openai.com/v1",
+        model: process.env.OPENAI_STRUCTURE_MODEL ?? "gpt-4.1-mini",
+        transcriptionModel: process.env.OPENAI_TRANSCRIPTION_MODEL ?? "gpt-4o-mini-transcribe",
+        apiStyle: "responses",
+        apiKeyRequired: true,
+        apiKey: process.env.OPENAI_API_KEY
+      }
+    : undefined;
+  const transcriptionClient = createConfigurableTranscriptionClient({
+    providerManager,
+    fallbackProvider: environmentProvider
+  });
   const structureClient = createConfigurableMeetingStructureClient({
     providerManager,
-    fallbackProvider: process.env.OPENAI_API_KEY
-      ? {
-          id: "environment-openai",
-          name: "OpenAI（环境变量）",
-          baseUrl: "https://api.openai.com/v1",
-          model: process.env.OPENAI_STRUCTURE_MODEL ?? "gpt-4.1-mini",
-          apiStyle: "responses",
-          apiKeyRequired: true,
-          apiKey: process.env.OPENAI_API_KEY
-        }
-      : undefined
+    fallbackProvider: environmentProvider
   });
   const runtimeConfig = resolveMainRuntimeConfig({
     env: process.env,
@@ -89,7 +125,8 @@ app.whenReady().then(async () => {
     appPath: app.getAppPath(),
     resourcesPath: process.resourcesPath,
     isPackaged: app.isPackaged,
-    structureClient
+    structureClient,
+    transcriptionClient
   });
 
   if (runtimeConfig.demoMode) {
@@ -98,16 +135,6 @@ app.whenReady().then(async () => {
     );
   }
 
-  const workspaceManager = createWorkspaceManager({
-    configPath: path.join(app.getPath("userData"), "workspace.json")
-  });
-  await workspaceManager.load();
-  const settingsManager = createSettingsManager({
-    applyOpenAtStartup: (openAtStartup) => app.setLoginItemSettings({ openAtLogin: openAtStartup }),
-    configPath: path.join(app.getPath("userData"), "settings.json"),
-    env: process.env
-  });
-  await settingsManager.load();
   const meetingStore = createWorkspaceMeetingStore(workspaceManager);
 
   registerSettingsIpc({ settingsManager });
@@ -117,10 +144,11 @@ app.whenReady().then(async () => {
     store: meetingStore,
     ...runtimeConfig.meetingIpc
   });
-  registerRecordingIpc({
+  const recordingController = registerRecordingIpc({
     store: meetingStore,
     ...runtimeConfig.recordingIpc
   });
+  registerAudioShutdown(app, () => recordingController.shutdown());
   createMainWindow();
   installApplicationMenu();
 

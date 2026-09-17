@@ -21,6 +21,7 @@ export type MainRuntimeConfigInput = {
   resourcesPath?: string;
   isPackaged?: boolean;
   structureClient?: MeetingStructureClient;
+  transcriptionClient?: TranscriptionClient;
 };
 
 export type MainRuntimeConfig = {
@@ -38,7 +39,8 @@ export function resolveMainRuntimeConfig({
   appPath = process.cwd(),
   resourcesPath = process.cwd(),
   isPackaged = false,
-  structureClient
+  structureClient,
+  transcriptionClient
 }: MainRuntimeConfigInput): MainRuntimeConfig {
   const demoMode =
     env.MEETMAP_DEMO_MODE === "1" || argv.includes("--meetmap-demo");
@@ -67,7 +69,9 @@ export function resolveMainRuntimeConfig({
             workflowMode: "production",
             workflowServices: createProductionWorkflowServices({
               diarizationClient: createTrackDiarizationClient(),
-              transcriptionClient: createOpenAiTranscriptionClient({
+              // A provider saved in settings wins over stale environment
+              // credentials, matching how the structure client resolves.
+              transcriptionClient: transcriptionClient ?? createOpenAiTranscriptionClient({
                 apiKey: providerConfig.transcription.apiKey,
                 model: providerConfig.transcription.model,
                 requestTranscription: requesters.requestTranscription
@@ -91,7 +95,9 @@ export function resolveMainRuntimeConfig({
           workflowMode: "production",
           workflowServices: createProductionWorkflowServices({
             diarizationClient: createTrackDiarizationClient(),
-            transcriptionClient: createUnavailableTranscriptionClient(),
+            // Without environment credentials the saved LLM provider is the
+            // transcription service, resolved per chunk rather than at startup.
+            transcriptionClient: transcriptionClient ?? createUnavailableTranscriptionClient(),
             structureClient
           })
         },
@@ -158,7 +164,9 @@ export function resolveNativeAudioHelperPath({
 function createUnavailableTranscriptionClient(): TranscriptionClient {
   return {
     async transcribeChunk() {
-      throw new Error("音频转写尚未配置。请通过环境变量配置转写服务后再处理音频。");
+      throw new Error(
+        "音频转写尚未配置。请在设置的「LLM 提供商」中添加一个服务并选择转写模型，或通过环境变量配置。"
+      );
     }
   };
 }

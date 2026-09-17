@@ -3,6 +3,7 @@ import { copyFile, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { basename, extname, join, parse } from "node:path";
 import { pathToFileURL } from "node:url";
 import { dialog, ipcMain, shell } from "electron";
+import { sendIfAlive } from "./sendIfAlive.js";
 import { readWavFileInfo } from "../../src/features/audio-analysis/wavFile.js";
 import { createHtmlMeetingMap } from "../../src/features/exports/html-map/htmlMapExport.js";
 import { createWordSummaryDocx } from "../../src/features/exports/word/wordExport.js";
@@ -367,7 +368,7 @@ function sendProcessingProgress(event: unknown, progress: unknown): void {
     return;
   }
 
-  event.sender.send("meeting:processing-progress", progress);
+  sendIfAlive(event.sender, "meeting:processing-progress", progress);
 }
 async function readOptionalJson<T>(filePath: string, shouldExist: boolean): Promise<T | null> {
   if (!shouldExist) {

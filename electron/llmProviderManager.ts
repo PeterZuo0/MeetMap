@@ -26,6 +26,8 @@ export type LlmProviderManager = {
   deleteProvider(providerId: string): Promise<LlmProviderState>;
   setActiveProvider(providerId: string | null): Promise<LlmProviderState>;
   getActiveProviderWithSecret(): LlmProviderWithSecret | null;
+  /** Decrypted key for one provider, so the main process can call it directly. */
+  getProviderSecret(providerId: string): string | null;
 };
 
 export function createLlmProviderManager({
@@ -86,6 +88,7 @@ export function createLlmProviderManager({
         name: parsed.name,
         baseUrl: parsed.baseUrl,
         model: parsed.model,
+        transcriptionModel: parsed.transcriptionModel,
         apiStyle: parsed.apiStyle,
         apiKeyRequired: parsed.apiKeyRequired,
         encryptedApiKey
@@ -137,10 +140,18 @@ export function createLlmProviderManager({
         name: active.name,
         baseUrl: active.baseUrl,
         model: active.model,
+        transcriptionModel: active.transcriptionModel ?? "",
         apiStyle: active.apiStyle,
         apiKeyRequired: active.apiKeyRequired,
         apiKey: active.encryptedApiKey ? decryptSecret(active.encryptedApiKey) : ""
       };
+    },
+    getProviderSecret(providerId) {
+      const provider = storedState.providers.find((item) => item.id === providerId);
+      if (!provider?.encryptedApiKey) {
+        return null;
+      }
+      return decryptSecret(provider.encryptedApiKey);
     }
   };
 }
@@ -151,6 +162,7 @@ function toPublicProfile(provider: StoredLlmProvider): LlmProviderProfile {
     name: provider.name,
     baseUrl: provider.baseUrl,
     model: provider.model,
+    transcriptionModel: provider.transcriptionModel ?? "",
     apiStyle: provider.apiStyle,
     apiKeyRequired: provider.apiKeyRequired,
     apiKeyConfigured: Boolean(provider.encryptedApiKey)
@@ -174,6 +186,9 @@ function parseProviderInput(input: SaveLlmProviderInput): Required<SaveLlmProvid
     id: input.id ? parseProviderId(input.id) : "",
     name,
     model,
+    transcriptionModel: input.transcriptionModel
+      ? parseShortText(input.transcriptionModel, "转写模型名称", 160)
+      : "",
     baseUrl,
     apiStyle,
     apiKeyRequired,
@@ -199,6 +214,9 @@ function parseStoredState(input: unknown): StoredLlmProviderState {
         name: parseShortText(value.name, "提供商名称", 80),
         baseUrl: normalizeBaseUrl(value.baseUrl),
         model: parseShortText(value.model, "模型名称", 160),
+        transcriptionModel: typeof value.transcriptionModel === "string"
+          ? value.transcriptionModel
+          : "",
         apiStyle: parseApiStyle(value.apiStyle),
         apiKeyRequired: value.apiKeyRequired !== false,
         encryptedApiKey: typeof value.encryptedApiKey === "string" ? value.encryptedApiKey : ""

@@ -10,10 +10,18 @@ export type SettingsManager = {
   update(settings: AppSettings): Promise<AppSettings>;
 };
 
+export type ConfiguredTranscriptionProvider = {
+  name: string;
+  model: string;
+  transcriptionModel: string;
+};
+
 export type SettingsManagerOptions = {
   applyOpenAtStartup?: (enabled: boolean) => void;
   configPath: string;
   env?: NodeJS.ProcessEnv;
+  /** The provider saved in settings, which outranks environment credentials. */
+  getConfiguredProvider?: () => ConfiguredTranscriptionProvider | null;
 };
 
 const DEFAULT_OPENAI_TRANSCRIPTION_MODEL = "gpt-4o-mini-transcribe";
@@ -22,7 +30,8 @@ const DEFAULT_OPENAI_STRUCTURE_MODEL = "gpt-4.1-mini";
 export function createSettingsManager({
   applyOpenAtStartup,
   configPath,
-  env = process.env
+  env = process.env,
+  getConfiguredProvider
 }: SettingsManagerOptions): SettingsManager {
   let settings = DEFAULT_APP_SETTINGS;
   let loaded = false;
@@ -59,12 +68,28 @@ export function createSettingsManager({
   }
 
   async function getRuntimeStatus(): Promise<SettingsRuntimeStatus> {
+    const provider = getConfiguredProvider?.() ?? null;
+    if (provider?.transcriptionModel.trim()) {
+      return {
+        openAi: {
+          configured: true,
+          source: provider.name,
+          structureModel: provider.model,
+          transcriptionModel: provider.transcriptionModel
+        }
+      };
+    }
+
     const apiKey = env.OPENAI_API_KEY?.trim();
     return {
       openAi: {
         configured: Boolean(apiKey),
-        source: apiKey ? ".env or process environment" : "missing OPENAI_API_KEY",
-        structureModel: env.OPENAI_STRUCTURE_MODEL ?? DEFAULT_OPENAI_STRUCTURE_MODEL,
+        source: apiKey
+          ? ".env or process environment"
+          : provider
+            ? `${provider.name}（未选择转写模型）`
+            : "missing OPENAI_API_KEY",
+        structureModel: provider?.model ?? env.OPENAI_STRUCTURE_MODEL ?? DEFAULT_OPENAI_STRUCTURE_MODEL,
         transcriptionModel: env.OPENAI_TRANSCRIPTION_MODEL ?? DEFAULT_OPENAI_TRANSCRIPTION_MODEL
       }
     };

@@ -72,13 +72,62 @@ audio:focus-visible {
   padding: 38px 0 72px;
 }
 
-.settings-frame {
-  padding: 38px 0 90px;
+.settings-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: clamp(16px, 5vh, 64px) 18px;
+  background: rgba(36, 35, 33, 0.42);
+  backdrop-filter: blur(2px);
+  overflow-y: auto;
+}
+
+.settings-dialog {
+  position: relative;
+  width: min(1080px, 100%);
+  padding: 0 clamp(22px, 4vw, 54px) 44px;
+  border: 1px solid var(--line-strong);
+  background: var(--paper);
+  box-shadow: 0 28px 70px rgba(36, 35, 33, 0.22);
+}
+
+.settings-close {
+  position: absolute;
+  top: 22px;
+  right: clamp(22px, 4vw, 54px);
+  min-height: 32px;
+  padding: 0 14px;
+  border: 1px solid var(--line-strong);
+  background: transparent;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.settings-close:hover {
+  border-color: var(--ink);
+}
+
+.settings-footer-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.settings-footer-actions button:not(.settings-save) {
+  min-height: 38px;
+  padding: 0 15px;
+  border: 1px solid var(--line-strong);
+  background: transparent;
+  cursor: pointer;
+  font-size: 12px;
 }
 
 .settings-head {
   width: min(820px, 82%);
-  padding: 92px 0 54px;
+  padding: 52px 0 38px;
 }
 
 .settings-head h1 {
@@ -224,6 +273,18 @@ audio:focus-visible {
   color: #567661;
 }
 
+.settings-note {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.llm-field-hint {
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.5;
+}
+
 .settings-save {
   min-width: 150px;
   min-height: 46px;
@@ -277,6 +338,29 @@ audio:focus-visible {
 
 .provider-state.ready .state-dot {
   background: #567661;
+}
+
+.home-header-actions,
+.recording-topline-end {
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.ghost-small {
+  min-height: 30px;
+  padding: 0 13px;
+  border: 1px solid var(--line-strong);
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 12px;
+  transition: border-color 220ms var(--ease), background 220ms var(--ease);
+}
+
+.ghost-small:hover {
+  border-color: var(--ink);
+  background: rgba(250, 249, 246, 0.8);
 }
 
 .home-intro {
@@ -363,6 +447,15 @@ audio:focus-visible {
   display: flex;
   align-items: center;
   gap: 9px;
+  flex-wrap: wrap;
+}
+
+.processing-error-note {
+  max-width: 640px;
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.7;
 }
 
 .workspace-actions button,
@@ -388,6 +481,11 @@ audio:focus-visible {
 .processing-error button:hover {
   border-color: var(--ink);
   background: rgba(250, 249, 246, 0.8);
+}
+
+.llm-editor-footer .solid-small {
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .solid-small,
@@ -681,9 +779,23 @@ button:disabled {
   color: var(--accent-dark) !important;
 }
 
+/* The provider editor needs more room than the settings two-column rhythm
+   leaves in the right track, so this group runs full width. */
+.llm-settings-group {
+  grid-template-columns: 1fr;
+  gap: 26px;
+}
+
+.settings-group > *,
+.llm-provider-layout > *,
+.llm-field-grid label,
+.llm-field-grid .llm-field {
+  min-width: 0;
+}
+
 .llm-provider-layout {
   display: grid;
-  grid-template-columns: minmax(190px, 0.62fr) minmax(340px, 1fr);
+  grid-template-columns: minmax(0, 0.62fr) minmax(0, 1fr);
   gap: 24px;
 }
 
@@ -754,25 +866,52 @@ button:disabled {
 
 .llm-field-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 190px), 1fr));
   gap: 14px;
   padding: 18px 0 12px;
 }
 
-.llm-field-grid label {
+.llm-field-grid label,
+.llm-field-grid .llm-field {
   display: grid;
   gap: 7px;
 }
 
 .llm-field-grid label > span,
+.llm-field-grid .llm-field > span,
+.llm-field-grid .llm-field label,
 .llm-no-key {
   color: var(--muted);
   font-size: 10px;
 }
 
+.llm-field-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 20px;
+}
+
+.llm-inline-action {
+  padding: 3px 8px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 9px;
+  white-space: nowrap;
+}
+
+.llm-inline-action:hover:not(:disabled) {
+  border-color: var(--ink);
+  color: var(--ink);
+}
+
 .llm-field-grid input,
 .llm-field-grid select {
   width: 100%;
+  min-width: 0;
   height: 41px;
   padding: 0 11px;
   border: 1px solid var(--line-strong);
@@ -797,15 +936,19 @@ button:disabled {
   align-items: center;
   justify-content: space-between;
   gap: 20px;
+  flex-wrap: wrap;
   margin-top: 16px;
   padding-top: 14px;
   border-top: 1px solid var(--line);
 }
 
-@media (max-width: 980px) {
+@media (max-width: 1080px) {
   .llm-provider-layout {
     grid-template-columns: 1fr;
   }
+}
+
+@media (max-width: 980px) {
 
   .recent-list .meeting-library-row {
     grid-template-columns: minmax(0, 1fr) auto;
@@ -1202,29 +1345,25 @@ button:disabled {
 }
 
 .live-waveform {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 5px;
+  position: relative;
   height: 170px;
   margin: 44px 0 36px;
   overflow: hidden;
   border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
+  mask-image: linear-gradient(90deg, transparent 0, #000 9%, #000 100%);
+  -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 9%, #000 100%);
+  transition: opacity 220ms ease;
 }
 
-.live-waveform span {
-  width: 3px;
-  height: 116px;
-  background: var(--accent);
-  opacity: 0.68;
-  transform-origin: center;
-  transition: transform 180ms ease-out, opacity 220ms ease;
+.live-waveform canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
 }
 
-.live-waveform.paused span {
-  transform: scaleY(0.05) !important;
-  opacity: 0.28;
+.live-waveform.paused {
+  opacity: 0.6;
 }
 
 .recording-controls {
@@ -2211,9 +2350,16 @@ button:disabled {
 
   .home-frame,
   .inner-frame,
-  .settings-frame,
   .transcript-frame {
     padding-top: 22px;
+  }
+
+  .settings-overlay {
+    padding: 0;
+  }
+
+  .settings-dialog {
+    min-height: 100%;
   }
 
   .home-intro h1,
@@ -2314,7 +2460,8 @@ button:disabled {
   }
 
   .live-waveform {
-    gap: 3px;
+    height: 132px;
+    margin: 32px 0 28px;
   }
 
   .recording-controls {
